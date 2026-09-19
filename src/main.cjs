@@ -13,7 +13,7 @@
  * quit, forced after 5s).
  */
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -309,4 +309,92 @@ app.whenReady().then(() => {
   } catch {
     logStream = null;
   }
+  setupStableSnapshotMenu();
 });
+
+/**
+ * 稳定版快照：把当前 resources/runtime 完整备份到用户数据目录，
+ * 供更新失败时一键回滚。只保留最近 3 份，更早的自动清理。
+ */
+function stableBackupRoot() {
+  return path.join(app.getPath('userData'), 'runtime-stable-backups');
+}
+
+async function snapshotStableRuntime() {
+  const runtimeSrc = path.join(resourcesRoot(), 'runtime');
+  if (!fs.existsSync(runtimeSrc)) throw new Error('未找到运行时目录：' + runtimeSrc);
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const dest = path.join(stableBackupRoot(), 'runtime-' + stamp);
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['开始备份', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    title: '保存稳定版快照',
+    message: '把当前正在稳定使用的完整运行时备份下来吗？',
+    detail: '备份位置：' + dest + '\n完整运行时约 5GB，需要几分钟；更新失败时可用备份一键回滚。只保留最近 3 份。',
+  }).then((result) => {
+    if (result.response !== 0) throw new Error('canceled');
+  });
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info', buttons: ['知道了'], title: '正在备份',
+    message: '正在备份，请勿关闭应用（完成后会再提示）。',
+  });
+  await fs.promises.cp(runtimeSrc, dest, { recursive: true, verbatimSymlinks: true });
+  // 只保留最近 3 份
+  const root = stableBackupRoot();
+  const snaps = fs.readdirSync(root).filter((n) => n.startsWith('runtime-')).sort().reverse();
+  for (const stale of snaps.slice(3)) {
+    fs.rmSync(path.join(root, stale), { recursive: true, force: true });
+  }
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info', buttons: ['知道了'], title: '稳定版快照已保存',
+    message: '稳定版快照已保存到：' + dest,
+    detail: '更新失败需要回滚时，在菜单选择"恢复稳定版快照"即可。',
+  });
+}
+
+async function restoreStableRuntime() {
+  const root = stableBackupRoot();
+  const snaps = fs.existsSync(root)
+    ? fs.readdirSync(root).filter((n) => n.startsWith('runtime-')).sort().reverse()
+    : [];
+  if (snaps.length === 0) {
+    await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '暂无快照', message: '还没有任何稳定版快照。先在菜单选择"保存当前为稳定版快照"创建一份。' });
+    return;
+  }
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: [...snaps.slice(0, 3), '取消'],
+    defaultId: 0,
+    cancelId: snaps.slice(0, 3).length,
+    title: '恢复稳定版快照',
+    message: '选择要恢复的快照（将覆盖当前运行时）：',
+    detail: '恢复后重启应用生效。',
+  });
+  if (result.response >= Math.min(snaps.length, 3)) return;
+  const chosen = snaps[result.response];
+  const runtimeSrc = path.join(resourcesRoot(), 'runtime');
+  await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '正在恢复', message: '正在恢复，请勿关闭应用（完成后会再提示）。' });
+  await fs.promises.cp(path.join(root, chosen), runtimeSrc, { recursive: true, verbatimSymlinks: true });
+  await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '恢复完成', message: '快照已恢复：' + chosen + '。重启应用生效。' });
+}
+
+function setupStableSnapshotMenu() {
+  const template = [
+    {
+      label: '工具',
+      submenu: [
+        { label: '保存当前为稳定版快照', click: () => { snapshotStableRuntime().catch((e) => { if (String(e.message) !== 'canceled') dialog.showErrorBox('快照失败', String(e.message)); }); } },
+        { label: '恢复稳定版快照', click: () => { restoreStableRuntime().catch((e) => dialog.showErrorBox('恢复失败', String(e.message))); } },
+        { type: 'separator' },
+        { label: '打开备份目录', click: () => { fs.mkdirSync(stableBackupRoot(), { recursive: true }); shell.openPath(stableBackupRoot()); } },
+      ],
+    },
+    { label: '文件', submenu: [{ role: 'quit', label: '退出' }] },
+    { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
+    { label: '视图', submenu: [{ role: 'reload', label: '重新加载' }, { role: 'forceReload', label: '强制重新加载' }, { role: 'toggleDevTools', label: '切换开发者工具' }, { type: 'separator' }, { role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' }, { type: 'separator' }, { role: 'togglefullscreen', label: '切换全屏' }] },
+    { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭' }] },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
