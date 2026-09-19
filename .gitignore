@@ -11,3 +11,8 @@ plugins/*/node_modules/
 plugins/*/dist/
 *.log
 .env
+
+# 本地构建中间物
+asar-stage/
+app.asar.bak
+app-new.asar
