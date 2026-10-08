@@ -3,14 +3,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseDocument } from 'yaml';
-import { CardRegistry } from '../lib/cards/registry.js';
+import { CardRegistry } from '../../../lib/cards/registry.js';
+import { skillRoot } from '../../support/environment.mjs';
 
 const names = [
   'math-paper-cn', 'math-paper-huashu', 'math-paper-huawei', 'grill-with-docs', 'ai-draw-skills', 'py-nature',
   'grill-ai-review', 'humanizer', 'research-writing-skill', 'claude-vision-skill', 'anti-autoresearch',
   'imagegen',
 ];
-const root = resolve(import.meta.dirname, '../../../.dsh/skills');
+const root = skillRoot;
 
 test('十二项卡片 Skill 全部仅手动调用', async () => {
   for (const name of names) {

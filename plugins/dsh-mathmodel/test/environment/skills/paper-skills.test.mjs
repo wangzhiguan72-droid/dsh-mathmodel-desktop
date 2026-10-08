@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseDocument } from 'yaml';
-import { CardRegistry } from '../lib/cards/registry.js';
-import { MathModelCardsRemote } from '../lib/cards/remote.js';
+import { CardRegistry } from '../../../lib/cards/registry.js';
+import { MathModelCardsRemote } from '../../../lib/cards/remote.js';
+import { skillRoot } from '../../support/environment.mjs';
 
-const root = resolve(import.meta.dirname, '../../../.dsh/skills');
+const root = skillRoot;
 const names = ['math-paper-cn', 'math-paper-huashu', 'math-paper-huawei'];
 
 function frontmatter(source) {

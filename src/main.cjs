@@ -15,13 +15,17 @@
 
 const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const { spawn, execFile } = require('node:child_process');
+const { createInterface } = require('node:readline');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createUpdateController } = require('./update-controller.cjs');
+const { acknowledgeBoot } = require('./desktop-updates.cjs');
 const {
   resolveRuntimePaths,
   resolveDshHome,
   resolveProfileName,
+  profileSeedStamp,
   childEnv,
   readStampFile,
   profileAction,
@@ -30,6 +34,7 @@ const {
   waitForGui,
   parseTokenUrlLine,
   ensureProfileFallbacks,
+  ensureFrameworkCohort,
   checkVcRuntime,
   isProgrammaticLaunch,
 } = require('./runtime.cjs');
@@ -37,6 +42,19 @@ const {
 const READY_TIMEOUT_MS = 180000;
 const LOG_TAIL_LINES = 200;
 /** The host prints its tokenized GUI URL on this stdout line. */
+
+// Isolate desktop cookies, caches, logs and the single-instance lock alongside
+// an explicitly selected test/development home, before Electron becomes ready.
+if (process.env.DSH_DESKTOP_USER_DATA?.trim()) {
+  const dataHome = resolveDshHome({ DSH_HOME: process.env.DSH_DESKTOP_USER_DATA }, os.homedir());
+  fs.mkdirSync(dataHome, { recursive: true });
+  app.setPath('userData', dataHome);
+  app.setPath('sessionData', dataHome);
+  const crashDumps = path.join(dataHome, 'crash-dumps');
+  fs.mkdirSync(crashDumps, { recursive: true });
+  app.setPath('crashDumps', crashDumps);
+  app.setAppLogsPath(path.join(dataHome, 'logs'));
+}
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -46,6 +64,7 @@ let quitting = false;
 let logStream = null;
 /** URL printed by the host (with the per-process token), set once seen. */
 let tokenUrl = null;
+let updateController = null;
 /** Ring buffer of recent host output for the error page. */
 const logTail = [];
 
@@ -81,6 +100,20 @@ function startHost(runtime, home, port, profileName) {
   // `dsh web` is hardcoded to the `web` profile; a custom profile boots via
   // `dsh --profile <name>` with the web app's own flags following.
   const args = [runtime.hostBin, '--profile', profileName, '--no-open', '--host', '127.0.0.1', '--port', String(port)];
+  if (process.env.DSH_DESKTOP_UPDATE_JOB) {
+    const nonce = process.env.DSH_DESKTOP_UPDATE_NONCE;
+    const filename = path.resolve(process.env.DSH_DESKTOP_UPDATE_JOB);
+    if (!/^[a-f0-9-]{36}$/.test(nonce || '')
+      || path.dirname(filename) !== path.join(app.getPath('userData'), 'desktop-updates')) {
+      throw new Error('Pending update host identity mismatch');
+    }
+    const job = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    if (job.nonce !== nonce || job.installDir !== path.dirname(app.getPath('exe'))
+      || job.toVersion !== app.getVersion() || job.state !== 'prepared') {
+      throw new Error('Pending update host identity mismatch');
+    }
+    args.unshift(`--title=dsh-desktop-update-host-${nonce}`);
+  }
   const child = spawn(runtime.nodeBin, args, {
     cwd: home,
     env: childEnv(home, runtime.nodeHome, process.platform, process.env, nodePaths),
@@ -89,13 +122,11 @@ function startHost(runtime, home, port, profileName) {
   });
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  const onData = (chunk) => {
-    for (const line of String(chunk).split(/\r?\n/)) {
+  for (const stream of [child.stdout, child.stderr]) {
+    createInterface({ input: stream, crlfDelay: Infinity }).on('line', line => {
       if (line !== '') pushLogLine(line);
-    }
-  };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
+    });
+  }
   return child;
 }
 
@@ -135,6 +166,7 @@ function stopHost(child) {
 
 function createWindow() {
   const window = new BrowserWindow({
+    show: process.env.DSH_DESKTOP_HEADLESS !== '1',
     width: 1440,
     height: 900,
     minWidth: 960,
@@ -178,6 +210,8 @@ async function boot() {
   const runtime = resolveRuntimePaths(resourcesRoot(), process.platform, process.arch, app.isPackaged);
   const home = resolveDshHome(process.env, os.homedir());
   pushLogLine('[desktop] dsh home: ' + home);
+  pushLogLine('[desktop] Electron user data: ' + app.getPath('userData'));
+  pushLogLine('[desktop] Electron session data: ' + app.getPath('sessionData'));
 
   if (process.platform === 'win32' && !checkVcRuntime()) {
     pushLogLine('[desktop] warning: Visual C++ runtime (vcruntime140.dll) is missing');
@@ -202,16 +236,20 @@ async function boot() {
   if (!fs.existsSync(runtime.hostBin)) throw new Error('bundled dsh host is missing: ' + runtime.hostBin);
 
   const stamp = readStampFile(runtime.stampFile);
-  const stampText = stamp === undefined ? 'unknown' : [stamp.node, stamp.host, stamp.webAll].join(' / ');
+  const stampText = profileSeedStamp(stamp, runtime.runtimeRoot);
   const profileName = resolveProfileName(process.env);
   pushLogLine('[desktop] dsh profile: ' + profileName);
   const profileDir = path.join(home, 'profiles', profileName);
   const action = profileAction(profileDir, stampText);
+  pushLogLine('[desktop] profile action: ' + action + ' (' + stampText + ')');
   if (action !== 'leave') {
     setStatus('Installing the bundled ' + profileName + ' profile…');
-    pushLogLine('[desktop] profile action: ' + action + ' (' + stampText + ')');
     applyProfileSeed(runtime.profileSeed, profileDir, action, stampText, { appVersion: app.getVersion() });
   }
+
+  const cohort = ensureFrameworkCohort(home, path.join(runtime.runtimeRoot, 'host'), profileName, stampText);
+  if (cohort.linked.length > 0) pushLogLine('[desktop] unified official framework packages: ' + cohort.linked.join(', '));
+  if (cohort.backupDir) pushLogLine('[desktop] previous framework packages backed up at: ' + cohort.backupDir);
 
   try {
     ensureProfileFallbacks(home, path.join(runtime.runtimeRoot, 'host'), profileName);
@@ -224,6 +262,7 @@ async function boot() {
   pushLogLine('[desktop] spawning the desktop host on 127.0.0.1:' + port
     + ' (the user\u2019s own dsh web defaults 3080/3081 are never taken)');
   hostChild = startHost(runtime, home, port, profileName);
+  pushLogLine('[desktop] host pid: ' + hostChild.pid);
   const child = hostChild;
   let exited = false;
   child.once('exit', (code, signal) => {
@@ -231,7 +270,13 @@ async function boot() {
     pushLogLine('[desktop] host exited: code=' + String(code) + ' signal=' + String(signal));
     if (!quitting) void showError('The dsh host process stopped unexpectedly.');
   });
-  await waitForGui(port, { deadlineMs: READY_TIMEOUT_MS, isAlive: () => !exited });
+  const pendingUpdate = Boolean(process.env.DSH_DESKTOP_UPDATE_JOB);
+  // The HTTP listener can answer while the plugin loader is still working.
+  // Updates must wait for the host's authenticated readiness announcement.
+  await waitForGui(port, { deadlineMs: pendingUpdate ? 15 * 60 * 1000 : READY_TIMEOUT_MS,
+    isAlive: () => !exited,
+    ...(pendingUpdate ? { getTokenUrl: () => tokenUrl } : {}),
+  });
   // The token URL line can land a moment after the port answers; give it a
   // short grace period before falling back to the bare (401) URL.
   for (let waited = 0; tokenUrl === null && waited < 5000; waited += 250) {
@@ -240,6 +285,31 @@ async function boot() {
   const target = tokenUrl ?? ('http://127.0.0.1:' + port + '/');
   pushLogLine('[desktop] GUI ready, loading ' + (tokenUrl === null ? 'the bare URL (no token line seen)' : 'the tokenized URL'));
   await mainWindow.loadURL(target);
+  pushLogLine('[desktop] GUI loaded');
+  if (process.env.DSH_DESKTOP_UPDATE_JOB) {
+    if (!tokenUrl || exited || child.exitCode !== null || child.signalCode !== null) {
+      throw new Error('Updated host did not publish its own live GUI endpoint');
+    }
+    const first = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+    const cookie = first.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    const response = await fetch(new URL('/api/dsh-web-all/degraded', target), {
+      headers: { cookie }, signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error('Updated host health route failed: ' + response.status);
+    const health = await response.json();
+    if (!Array.isArray(health.degraded) || health.degraded.length) throw new Error('Updated host has degraded plugins');
+    const rows = await fetch(new URL('/api/dsh-web-all/rows', target), {
+      headers: { cookie }, signal: AbortSignal.timeout(30000),
+    });
+    const family = rows.ok ? await rows.json() : {};
+    if (!Array.isArray(family.children) || family.children.length !== 13) throw new Error('Updated host plugin family is incomplete');
+    if (exited || child.exitCode !== null || child.signalCode !== null) throw new Error('Updated host exited during boot verification');
+    await acknowledgeBoot({ jobPath: process.env.DSH_DESKTOP_UPDATE_JOB,
+      nonce: process.env.DSH_DESKTOP_UPDATE_NONCE, installDir: path.dirname(app.getPath('exe')),
+      userDataDir: app.getPath('userData'), version: app.getVersion(), pid: process.pid });
+    pushLogLine('[desktop] update boot health verified');
+  }
+  void updateController?.start();
 }
 
 async function run() {
@@ -249,6 +319,7 @@ async function run() {
     await boot();
   } catch (error) {
     pushLogLine('[desktop] boot failed: ' + String(error && error.message ? error.message : error));
+    if (process.env.DSH_DESKTOP_UPDATE_JOB) { app.quit(); return; }
     await showError(String(error && error.message ? error.message : error));
   }
 }
@@ -309,88 +380,48 @@ app.whenReady().then(() => {
   } catch {
     logStream = null;
   }
-  setupStableSnapshotMenu();
+  updateController = createUpdateController({ app, dialog, ipcMain, BrowserWindow,
+    getWindow: () => mainWindow,
+    getNodeBin: () => resolveRuntimePaths(resourcesRoot(), process.platform, process.arch, app.isPackaged).nodeBin,
+    log: pushLogLine });
+  setupDesktopMenu();
+  // Only a validated update job can request a cooperative stop from the worker.
+  if (process.env.DSH_DESKTOP_UPDATE_JOB && process.env.DSH_DESKTOP_UPDATE_NONCE) {
+    const quitRequest = path.join(app.getPath('userData'), `desktop-update-quit-${process.env.DSH_DESKTOP_UPDATE_NONCE}.json`);
+    const timer = setInterval(() => {
+      try {
+        const request = JSON.parse(fs.readFileSync(quitRequest, 'utf8'));
+        if (request.nonce === process.env.DSH_DESKTOP_UPDATE_NONCE && request.pid === process.pid) app.quit();
+      } catch { /* No owned shutdown request. */ }
+    }, 500);
+    timer.unref();
+    app.once('will-quit', () => clearInterval(timer));
+  }
+  if (process.env.DSH_DESKTOP_VERIFY === '1' && process.env.DSH_DESKTOP_HEADLESS === '1'
+    && process.env.DSH_DESKTOP_USER_DATA?.trim()) {
+    // The isolated packaged-app check can exercise app.quit() without a
+    // visible window or a numeric-PID termination of a hidden GUI process.
+    const quitRequest = path.join(app.getPath('userData'), 'desktop-quit-request');
+    const timer = setInterval(() => {
+      if (!fs.existsSync(quitRequest)) return;
+      clearInterval(timer);
+      pushLogLine('[desktop] verification requested app.quit()');
+      app.quit();
+    }, 500);
+    timer.unref();
+    app.once('will-quit', () => clearInterval(timer));
+  }
 });
 
-/**
- * 稳定版快照：把当前 resources/runtime 完整备份到用户数据目录，
- * 供更新失败时一键回滚。只保留最近 3 份，更早的自动清理。
- */
-function stableBackupRoot() {
-  return path.join(app.getPath('userData'), 'runtime-stable-backups');
-}
-
-async function snapshotStableRuntime() {
-  const runtimeSrc = path.join(resourcesRoot(), 'runtime');
-  if (!fs.existsSync(runtimeSrc)) throw new Error('未找到运行时目录：' + runtimeSrc);
-  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-  const dest = path.join(stableBackupRoot(), 'runtime-' + stamp);
-  await dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    buttons: ['开始备份', '取消'],
-    defaultId: 0,
-    cancelId: 1,
-    title: '保存稳定版快照',
-    message: '把当前正在稳定使用的完整运行时备份下来吗？',
-    detail: '备份位置：' + dest + '\n完整运行时约 5GB，需要几分钟；更新失败时可用备份一键回滚。只保留最近 3 份。',
-  }).then((result) => {
-    if (result.response !== 0) throw new Error('canceled');
-  });
-  await dialog.showMessageBox(mainWindow, {
-    type: 'info', buttons: ['知道了'], title: '正在备份',
-    message: '正在备份，请勿关闭应用（完成后会再提示）。',
-  });
-  await fs.promises.cp(runtimeSrc, dest, { recursive: true, verbatimSymlinks: true });
-  // 只保留最近 3 份
-  const root = stableBackupRoot();
-  const snaps = fs.readdirSync(root).filter((n) => n.startsWith('runtime-')).sort().reverse();
-  for (const stale of snaps.slice(3)) {
-    fs.rmSync(path.join(root, stale), { recursive: true, force: true });
-  }
-  await dialog.showMessageBox(mainWindow, {
-    type: 'info', buttons: ['知道了'], title: '稳定版快照已保存',
-    message: '稳定版快照已保存到：' + dest,
-    detail: '更新失败需要回滚时，在菜单选择"恢复稳定版快照"即可。',
-  });
-}
-
-async function restoreStableRuntime() {
-  const root = stableBackupRoot();
-  const snaps = fs.existsSync(root)
-    ? fs.readdirSync(root).filter((n) => n.startsWith('runtime-')).sort().reverse()
-    : [];
-  if (snaps.length === 0) {
-    await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '暂无快照', message: '还没有任何稳定版快照。先在菜单选择"保存当前为稳定版快照"创建一份。' });
-    return;
-  }
-  const result = await dialog.showMessageBox(mainWindow, {
-    type: 'question',
-    buttons: [...snaps.slice(0, 3), '取消'],
-    defaultId: 0,
-    cancelId: snaps.slice(0, 3).length,
-    title: '恢复稳定版快照',
-    message: '选择要恢复的快照（将覆盖当前运行时）：',
-    detail: '恢复后重启应用生效。',
-  });
-  if (result.response >= Math.min(snaps.length, 3)) return;
-  const chosen = snaps[result.response];
-  const runtimeSrc = path.join(resourcesRoot(), 'runtime');
-  await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '正在恢复', message: '正在恢复，请勿关闭应用（完成后会再提示）。' });
-  await fs.promises.cp(path.join(root, chosen), runtimeSrc, { recursive: true, verbatimSymlinks: true });
-  await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['知道了'], title: '恢复完成', message: '快照已恢复：' + chosen + '。重启应用生效。' });
-}
-
-function setupStableSnapshotMenu() {
+function setupDesktopMenu() {
   const template = [
-    {
-      label: '工具',
-      submenu: [
-        { label: '保存当前为稳定版快照', click: () => { snapshotStableRuntime().catch((e) => { if (String(e.message) !== 'canceled') dialog.showErrorBox('快照失败', String(e.message)); }); } },
-        { label: '恢复稳定版快照', click: () => { restoreStableRuntime().catch((e) => dialog.showErrorBox('恢复失败', String(e.message))); } },
-        { type: 'separator' },
-        { label: '打开备份目录', click: () => { fs.mkdirSync(stableBackupRoot(), { recursive: true }); shell.openPath(stableBackupRoot()); } },
-      ],
-    },
+    { label: '桌面更新', submenu: [
+      { label: '检查桌面更新', click: () => { void updateController.check(true); } },
+      { label: '查看并安装更新', click: () => { void updateController.open(); } },
+      { label: '恢复上一个版本', click: () => { void updateController.rollback(); } },
+      { type: 'separator' },
+      { label: '更新设置', click: () => updateController.showSettings() },
+    ] },
     { label: '文件', submenu: [{ role: 'quit', label: '退出' }] },
     { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
     { label: '视图', submenu: [{ role: 'reload', label: '重新加载' }, { role: 'forceReload', label: '强制重新加载' }, { role: 'toggleDevTools', label: '切换开发者工具' }, { type: 'separator' }, { role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' }, { type: 'separator' }, { role: 'togglefullscreen', label: '切换全屏' }] },

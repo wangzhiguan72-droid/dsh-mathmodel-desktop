@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { parseAndValidateCard, renderCardPrompt } from '../lib/index.js';
+import { parseAndValidateCard, renderCardPrompt } from '../../../lib/index.js';
+import { skillRoot } from '../../support/environment.mjs';
 
 const names = [
   'math-paper-cn', 'math-paper-huashu', 'math-paper-huawei', 'grill-with-docs', 'ai-draw-skills', 'py-nature',
   'grill-ai-review', 'humanizer', 'research-writing-skill', 'claude-vision-skill', 'anti-autoresearch',
   'imagegen',
 ];
-const skillRoot = resolve(import.meta.dirname, '../../../.dsh/skills');
-const snapshots = JSON.parse(await readFile(new URL('./card-snapshots.json', import.meta.url), 'utf8'));
+const snapshots = JSON.parse(await readFile(new URL('../../card-snapshots.json', import.meta.url), 'utf8'));
 
 async function loadCards() {
   return await Promise.all(names.map(async (name) => parseAndValidateCard(

@@ -62,10 +62,10 @@ test('品牌与 favicon 使用桌面快捷方式 ICO，覆盖展开和收起侧�
   const source = await readFile(new URL('../src/client-bundle.cjs', import.meta.url), 'utf8');
   const build = await readFile(new URL('../scripts/build.mjs', import.meta.url), 'utf8');
   const built = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8');
-  const shortcutIcon = await readFile(new URL('../../../MetaMath-Harness.ico', import.meta.url));
+  const shortcutIcon = await readFile(new URL('../../../src/assets/MetaMath-Harness.ico', import.meta.url));
   const embeddedIcon = built.match(/data:image\/x-icon;base64,([A-Za-z0-9+/=]+)/)?.[1];
 
-  assert.match(build, /\.\.\/\.\.\/MetaMath-Harness\.ico/);
+  assert.match(build, /\.\.\/\.\.\/src\/assets\/MetaMath-Harness\.ico/);
   assert.match(source, /metaMathBrandIcon/);
   assert.match(source, /__METAMATH_BRAND_ICON__/);
   assert.match(source, /sidebar\.brand\.mark/);
@@ -91,7 +91,7 @@ test('品牌修复不改动大道至简相关源码片段', async () => {
   const end = source.indexOf(endMarker, start) + endMarker.length;
   assert.ok(start >= 0 && end >= endMarker.length, '必须能定位大道至简相关源码片段');
   assert.equal(
-    createHash('sha256').update(source.slice(start, end)).digest('hex').toUpperCase(),
+    createHash('sha256').update(source.slice(start, end).replace(/\r\n/g, '\n')).digest('hex').toUpperCase(),
     'ACDEB684B7E9A4CD7336BCC8D128381B491078C51F22233BBB661817C7A78FCC',
   );
 });

@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchGitGraphProfile } from './patch-git-graph.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
@@ -53,13 +54,18 @@ function pnpmInstall(part) {
   // desktop runtime; failure class surfaced by release run 34077107610.
   const spawnOptions = {
     cwd: path.join(runtimeSrc, part),
-    env: { ...process.env },
+    env: { ...process.env, CI: 'true' },
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     shell: process.platform === 'win32',
   };
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const result = spawnSync('pnpm', ['install'], spawnOptions);
+    // pnpm 9 does not read these options from pnpm-workspace.yaml. Keep its
+    // install layout and peer policy consistent with the existing lockfiles.
+    const result = spawnSync('pnpm', [
+      'install', '--config.node-linker=hoisted',
+      '--config.auto-install-peers=' + String(part === 'host'),
+    ], spawnOptions);
     if (result.status === 0) {
       console.log(String(result.stdout).split('\n').slice(-6).join('\n'));
       return;
@@ -67,6 +73,9 @@ function pnpmInstall(part) {
     console.log('[build-runtime] pnpm install failed (attempt ' + attempt + '/' + attempts + '), status=' + result.status);
     if (result.stdout) console.log(String(result.stdout).split('\n').slice(-15).join('\n'));
     if (result.stderr) console.log(String(result.stderr).split('\n').slice(-15).join('\n'));
+    if (/ERR_PNPM_(?:LOCKFILE_CONFIG_MISMATCH|OUTDATED_LOCKFILE)/.test(String(result.stdout) + String(result.stderr))) {
+      throw new Error('runtime/' + part + ' lockfile does not match its install configuration');
+    }
     if (attempt < attempts) {
       // Synchronous, dependency-free sleep that works on every platform.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);
@@ -156,23 +165,38 @@ function assertNoSymlinks(root) {
   }
 }
 
+export function copyRuntimeModules(source, destination) {
+  const virtualStore = path.resolve(source, '.pnpm');
+  // Hoisted runtime packages are copied as real files. An old root store
+  // contains dependency junctions that would expand into redundant trees.
+  // Active package links and any nested node_modules remain dereferenced.
+  fs.cpSync(source, destination, {
+    recursive: true,
+    dereference: true,
+    filter: entry => path.resolve(entry) !== virtualStore,
+  });
+  removeBinDirs(destination);
+  assertNoSymlinks(destination);
+}
+
 function stage(part) {
   const dest = path.join(stagingRoot, part);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   for (const name of PART_FILES[part]) {
-    const source = path.join(runtimeSrc, part, name);
+    const source = part === 'profile-web' && name === 'cordis.patch.yml'
+      ? path.join(desktopDir, 'build', 'profile.cordis.patch.yml')
+      : path.join(runtimeSrc, part, name);
     if (!fs.existsSync(source)) {
       if (name === 'pnpm-lock.yaml') continue;
       throw new Error('expected ' + path.join('runtime', part, name) + ' after pnpm install');
     }
-    fs.cpSync(source, path.join(dest, name), { recursive: true, dereference: true });
+    if (name === 'node_modules') copyRuntimeModules(source, path.join(dest, name));
+    else fs.cpSync(source, path.join(dest, name), { recursive: true, dereference: true });
   }
   // node_modules/.bin holds pnpm's command shims (symlinks) at any depth;
   // nothing at runtime resolves through them, and symlinks must not enter
   // the installer.
-  removeBinDirs(path.join(dest, 'node_modules'));
-  assertNoSymlinks(path.join(dest, 'node_modules'));
   console.log('[build-runtime] staged ' + part + ' -> ' + path.relative(desktopDir, dest));
 }
 
@@ -235,10 +259,19 @@ const CLOUDFLARED_WIN_EXE_URL = 'https://github.com/cloudflare/cloudflared/relea
  * cannot carry two same-named darwin binaries, so the tunnel plugin
  * validates the staged binary and re-fetches the matching arch on first use.
  */
-async function stageCloudflaredWindowsBinary() {
+export async function stageCloudflaredWindowsBinary() {
   const exe = path.join(stagingRoot, 'profile-web', 'node_modules', 'cloudflared', 'bin', 'cloudflared.exe');
+  const cached = path.join(runtimeSrc, 'cache', 'cloudflared-windows-amd64.exe');
   if (fs.existsSync(exe) && isWindowsPe(exe)) {
     console.log('[build-runtime] cloudflared.exe already staged, skipping');
+    return;
+  }
+  // Profile staging replaces its tree. Keep the previously downloaded
+  // official Windows binary outside that tree so rebuilds can work offline.
+  if (fs.existsSync(cached) && isWindowsPe(cached)) {
+    fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.copyFileSync(cached, exe);
+    console.log('[build-runtime] staged cached cloudflared.exe');
     return;
   }
   console.log('[build-runtime] downloading ' + CLOUDFLARED_WIN_EXE_URL);
@@ -250,6 +283,8 @@ async function stageCloudflaredWindowsBinary() {
       throw new Error('downloaded cloudflared.exe is not a Windows PE binary (' + buffer.length + ' bytes)');
     }
     fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.mkdirSync(path.dirname(cached), { recursive: true });
+    fs.writeFileSync(cached, buffer);
     fs.writeFileSync(exe, buffer);
     console.log('[build-runtime] staged cloudflared.exe -> ' + path.relative(desktopDir, exe));
   } catch (error) {
@@ -296,6 +331,7 @@ async function main() {
   reconcileProfileCohort('profile-web');
   stage('host');
   stage('profile-web');
+  await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));
   await stageCloudflaredWindowsBinary();
   assertRuntimeEntrypoints();
 
@@ -310,4 +346,4 @@ async function main() {
   console.log('[build-runtime] runtime payload ready: ' + stamp.host + ' + ' + stamp.webAll);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

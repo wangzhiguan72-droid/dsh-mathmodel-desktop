@@ -39,12 +39,14 @@ mac:
   artifactName: dsh-mathmodel-desktop-${version}-mac-${arch}.${ext}
 
 win:
+  icon: src/assets/MetaMath-Harness.ico
   target:
     - nsis
     - zip
   artifactName: dsh-mathmodel-desktop-${version}-win-${arch}.${ext}
 
 nsis:
+  deleteAppDataOnUninstall: false
   oneClick: false
   perMachine: false
   allowElevation: true

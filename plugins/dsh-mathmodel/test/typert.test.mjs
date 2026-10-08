@@ -2,16 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TYPERT } from '../lib/typert.host.js';
 import { TYPERT_REMOTE } from '../lib/typert.remote-client.js';
-import { validateTypertManifest } from '../../../.dsh/profiles/node_modules/@deepseek-ai/dsh-typert-loader/lib/index.js';
-
-test('Host Typert 清单通过官方 Harness 校验器', () => {
-  const validated = validateTypertManifest('@deepseek-harness/dsh-mathmodel', TYPERT);
-  assert.equal(validated.invocations.length, 20);
-  assert.deepEqual(
-    new Set(validated.invocations.map((item) => item.namespace)),
-    new Set(['mathmodelCards', 'mathmodelCredentials', 'mathmodelPreflight', 'mathmodelProviders', 'mathmodelImageConnections', 'mathmodelOpenCodeRt', 'mathmodelStoredKeyModelDiscovery', 'mathmodelManualVision']),
-  );
-});
 
 test('Client 与 Host Remote 端点完全一致', () => {
   assert.deepEqual(

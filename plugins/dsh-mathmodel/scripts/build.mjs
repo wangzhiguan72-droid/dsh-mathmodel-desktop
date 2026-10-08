@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const brandIcon = await readFile(resolve(root, '../../MetaMath-Harness.ico'), 'base64');
+const brandIcon = await readFile(resolve(root, '../../src/assets/MetaMath-Harness.ico'), 'base64');
 const heroTitle = await readFile(resolve(root, 'src/assets/metamath-hero-title.png'), 'base64');
 const files = [
   ['src/index.js', 'lib/index.js'],

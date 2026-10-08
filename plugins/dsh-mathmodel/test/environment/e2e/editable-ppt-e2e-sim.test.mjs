@@ -15,12 +15,12 @@ import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import {
   EMPTY_IMAGE_CONNECTIONS, ImageConnectionCredentialStore, ImageConnectionService, ImageGenerationService,
-} from '../lib/index.js';
+} from '../../../lib/index.js';
+
+import { skillRoot } from '../../support/environment.mjs';
 
 const execFileAsync = promisify(execFile);
-const PLUGIN_ROOT = resolve(import.meta.dirname, '..');
-const WORKSPACE = resolve(PLUGIN_ROOT, '../..');
-const SKILL_ROOT = join(WORKSPACE, '.dsh/skills/image-to-editable-ppt');
+const SKILL_ROOT = resolve(skillRoot, 'image-to-editable-ppt');
 
 const FAKE_KEY = 'sk-e2e-fake-key-01';
 const stamp = '2026-09-02T03:00:00.000Z';
@@ -28,7 +28,7 @@ const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADU
 const TINY_PNG_B64 = TINY_PNG.toString('base64');
 
 function editpptExe() {
-  return process.env.EDITPPT_EXE || (process.platform === 'win32' ? 'D:\\CodexHome\\uv\\bin\\editppt.exe' : 'editppt');
+  return process.env.EDITPPT_EXE || 'editppt';
 }
 function pythonExe() {
   return process.env.DSH_PYTHON || 'python';
@@ -100,6 +100,10 @@ async function makeServices(fake) {
 }
 
 async function run(cmd, args, opts = {}) {
+  if (cmd === editpptExe() && !process.env.EDITPPT_EXE) {
+    cmd = pythonExe();
+    args = [join(SKILL_ROOT, 'cli/editppt/cli.py'), ...args];
+  }
   try {
     const { stdout, stderr } = await execFileAsync(cmd, args, { maxBuffer: 32 * 1024 * 1024, ...opts });
     return { code: 0, stdout, stderr };
@@ -231,9 +235,9 @@ test('模拟 E2E：dsh-current 全链路（单页 + 双页并发、页内串行�
   const fake = await startFakeProvider();
   try {
     const probe = await run(editpptExe(), ['--help']);
-    if (probe.code !== 0) { t.skip(`editppt 不可用：${probe.stderr}`); return; }
+    assert.equal(probe.code, 0, `技能库 editppt CLI 不可用；可设置 EDITPPT_EXE 指定已安装 CLI：${probe.stderr}`);
     const pythonProbe = await run(pythonExe(), ['-c', 'import PIL']);
-    if (pythonProbe.code !== 0) { t.skip('python/PIL 不可用'); return; }
+    assert.equal(pythonProbe.code, 0, 'python/PIL 不可用，请设置 DSH_PYTHON');
 
     const { service, created } = await makeServices(fake);
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'dsh-e2e-'));

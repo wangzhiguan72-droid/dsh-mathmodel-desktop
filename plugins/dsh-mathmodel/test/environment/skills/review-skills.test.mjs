@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseDocument } from 'yaml';
+import { skillRoot } from '../../support/environment.mjs';
 
-const skills = resolve(import.meta.dirname, '../../../.dsh/skills');
+const skills = skillRoot;
 
 function metadata(source) {
   const match = source.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);

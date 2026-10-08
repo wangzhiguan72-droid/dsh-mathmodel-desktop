@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   assertCompatibleHarnessVersion,
@@ -25,8 +27,14 @@ test('未知版本失败关闭', () => {
   assert.throws(() => assertCompatibleHarnessVersion(null), /当前 未检测到/);
 });
 
-test('从当前 Web Profile 解析锚点可发现官方 Harness', () => {
-  const profileManifest = resolve(import.meta.dirname, '../../../.dsh/profiles/web/package.json');
-  const detected = detectHarnessVersion(pathToFileURL(profileManifest));
-  assert.ok(SUPPORTED_DSH_VERSIONS.includes(detected), `未列入白名单的版本：${detected}`);
+test('从独立 npm 包解析锚点发现 Harness 版本', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mathmodel-version-'));
+  try {
+    const packageDir = join(root, 'node_modules', '@deepseek-ai', 'dsh');
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(join(packageDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.5-rc.3' }));
+    assert.equal(detectHarnessVersion(pathToFileURL(join(root, 'consumer.js'))), '0.1.5-rc.3');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,24 +1,24 @@
 # dsh-mathmodel-desktop — DeepSeek 数学建模版桌面端
 
-基于官方 `dsh-desktop` Electron 壳的**数学建模专属桌面发行版**：把最新版 DeepSeek Harness（`@deepseek-ai/dsh` `0.1.5-rc.1`）Web GUI 变成可安装的 Windows 桌面应用，内置独立 Node.js 运行时、dsh 宿主和预装好的数学建模 profile（官方 web bundle + dsh-web 插件全家桶 + **dsh-mathmodel 数学建模插件**），开箱即用——不需要预装 Node、npm 或 dsh CLI。
+基于官方 `dsh-desktop` Electron 壳的**数学建模专属桌面发行版**：把内置的 DeepSeek Harness（`@deepseek-ai/dsh` `0.1.5-rc.3`）Web GUI 变成可安装的 Windows 桌面应用，内置独立 Node.js 运行时、dsh 宿主和预装好的数学建模 profile（官方 web bundle + dsh-web 插件全家桶 + **dsh-mathmodel 数学建模插件**），开箱即用——不需要预装 Node、npm 或 dsh CLI。
 
 ## 数学建模能力（dsh-mathmodel 0.1.1）
 
 精华插件 `@deepseek-harness/dsh-mathmodel`（随本发行版内置于 `plugins/dsh-mathmodel`，以 `file:` 依赖装入 profile）：
 
-- `mathmodel` 模式 + 手动 Skill 卡片（扫描 `~/.dsh/skills/*/mathmodel-card.yml`，动态清单，点击"确定"只写草稿不发送）
+- 手动 Skill 卡片（扫描 `~/.dsh-mathmodel/skills/*/mathmodel-card.yml`，动态清单，点击"确定"只写草稿不发送）
 - 依赖预检（Python 科学计算包、XeLaTeX、latexmk、Draw.io、Poppler）
 - 视觉理解与受控生图（凭据 allowlist、付费确认、预算与数量上限、错误信息脱敏）
 - 图片转可编辑 PPT 专用生图链路（`editable_ppt_image`，Codex 后端防线）
-- 版本门失败关闭：`src/version.js` 白名单 `0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1`
+- 版本门失败关闭：`src/version.js` 白名单 `0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1 / 0.1.5-rc.2 / 0.1.5-rc.3`
 
-配套数学建模 skills（`~/.dsh/skills/`，与 dsh CLI 共享）：math-paper-cn、国赛摘要、单问深研求解、HTML 论文图、image-to-editable-ppt、ultramath 模型库等。
+配套数学建模 skills（`~/.dsh-mathmodel/skills/`，可通过链接共享实际技能库）：math-paper-cn、国赛摘要、单问深研求解、HTML 论文图、image-to-editable-ppt、ultramath 模型库等。
 
 ## 功能
 
-- 双击启动：当 `~/.dsh/profiles/web` 缺失时用内置 profile 种子初始化，用内置 Node 运行时在专用回环端口段 3082-3181 启动自己的 dsh 宿主，等 GUI 就绪后加载宿主打印的带 token URL（认证门每次进程启动签发一次性 token；会话 cookie 保存在应用窗口内）。
+- 双击启动：当 `~/.dsh-mathmodel/profiles/mathmodel` 缺失时用内置 profile 种子初始化，用内置 Node 运行时在专用回环端口段 3082-3181 启动自己的 dsh 宿主，等 GUI 就绪后加载宿主打印的带 token URL（认证门每次进程启动签发一次性 token；会话 cookie 保存在应用窗口内）。
 - 独立宿主、端口有保证：应用始终运行自己的内置宿主——不会附着到已有 GUI，也绝不占用原生 `dsh web` CLI 默认端口 3080/3081。优先使用专用端口段 3082-3181（跨启动地址稳定），段满时回退到系统分配端口。桌面实例与你自己的 `dsh web` 并存运行，各自持有独立的 GUI 会话。
-- 与已有 dsh 安装共享 `~/.dsh`：由本应用播种的 profile 带 `.dsh-desktop-seed.json` 标记，内置运行时版本变化时会被重新播种；没有该标记的 profile 视为用户自管，永不触碰。用户的 `cordis.patch.yml` 层在重新播种后保留。
+- 桌面版默认独占 `~/.dsh-mathmodel`，可用 `DSH_HOME` 覆盖：由本应用播种的 profile 带 `.dsh-desktop-seed.json` 标记，内置运行时版本变化时会被重新播种；没有该标记的 profile 视为用户自管，永不触碰。用户的 `cordis.patch.yml` 层在重新播种后保留。
 - 单实例：第二次启动只会聚焦已有窗口。关闭窗口即退出应用，并优雅停止由它启动的宿主。
 - 应用内插件管理开箱可用：`dsh plugin add/remove` 转发给安装在内置 Node 运行时里的 pnpm。
 
@@ -28,7 +28,7 @@
 | --- | --- |
 | `src/` | Electron 主进程（`main.cjs`）、可测试纯函数（`runtime.cjs`）、preload、启动页与错误页 |
 | `plugins/dsh-mathmodel/` | 精华数学建模插件源码（Host、Client、卡片注册、凭据、预检、视觉与生图） |
-| `runtime/host/` | 锁定 `@deepseek-ai/dsh@0.1.5-rc.1` 的宿主运行时载荷 |
+| `runtime/host/` | 锁定 `@deepseek-ai/dsh@0.1.5-rc.3` 的宿主运行时载荷 |
 | `runtime/profile-web/` | web profile 种子：`dsh-base` + `dsh-web-app` + `dsh-web-all` + `dsh-mathmodel`（`cordis.patch.yml` 接线：ui-skill 禁用，mathmodel/mathmodel-tools 插入） |
 | `scripts/` | Node/pnpm 下载校验（sha256）、运行时构建暂存、afterPack 载荷拷贝 |
 
@@ -42,22 +42,33 @@ npm run dist:win         # dist/*.exe（nsis）+ *.zip
 
 `npm start` 基于已暂存的 `resources/runtime/` 以未打包形态运行，供开发调试。
 
+运行时暂存完成后再打包。分发 Profile 的 patch 使用受版本控制的 `build/profile.cordis.patch.yml`，hooks 和技能目录按所选 `DSH_HOME` 解析。本次构建的卸载器保留个人 Harness 数据及外部技能目录。已有安装的覆盖升级需单独验证，因为会调用原版本的卸载器。
+
+暂存不分发根 `.pnpm` store，实际依赖和嵌套目录仍完整复制。Windows 隧道二进制可复用 `runtime/cache/cloudflared-windows-amd64.exe`，删除该缓存后重建会重新从官方源下载。
+
+Windows 解包产物可用 `npm run verify:win` 验证，也可用 `npm run verify:win -- dist/rc3-final-verified/win-unpacked` 指定构建目录。该命令在临时 home 中启动实际 EXE，检查完整 Profile、首次播种、重启、搬动应用后的重新播种及用户 patch 保留；技能使用脚本生成的夹具，子进程环境仅含必要系统变量及临时目录。临时验证材料保留供排查，退出时清除浏览器认证 URL。
+
+真实 NSIS 生命周期由 `scripts/build-windows-install-fixture.mjs` 与 `scripts/verify-windows-install.mjs` 验证：构建同一源码与安装钩子的独立测试名称、GUID 和快捷方式，先核验编译身份与文件哈希，再静默安装到中文含空格目录、运行已安装 EXE 的三阶段检查并卸载。具体命令和结果见 [Git Graph 与 NSIS 专项验证](docs/windows-git-graph-nsis-followup.md)。
+
+自动验证设置 `DSH_DESKTOP_USER_DATA` 隔离 Electron 数据、日志和崩溃记录，设置 `DSH_DESKTOP_HEADLESS=1` 隐藏窗口。普通启动无需这些变量。
+
 ## 日常升级
 
-- **更新内核**（稳定版备份 + 更新提醒）：
-  ```sh
-  node scripts/update-kernel.mjs --check    # 只检查 npm 最新版
-  node scripts/update-kernel.mjs            # 备份稳定版 -> 更新 -> 写 UPDATE-REMINDER.md
-  node scripts/update-kernel.mjs --rollback # 回滚到上一稳定版备份
-  ```
-  工作期间始终使用当前稳定版；更新脚本会把上一稳定版整体备份到
-  `resources/runtime/host-stable`，拉取 npm 最新内核，并在根目录写
-  `UPDATE-REMINDER.md` 提醒适配（dsh-mathmodel 版本门 + 回归清单）。
+Windows 桌面版 0.1.1 起提供应用内更新。左下角发现新版本时突出显示，点击查看说明；确认后下载，下载校验完成后另行确认安装和重启。更新源在“桌面更新 → 更新设置”中配置，仅检查这个桌面发行版的渠道，也可关闭启动时检查。
 
-- **手动升级**：
-  1. 改 `runtime/host/package.json` 的 `@deepseek-ai/dsh` 版本，并同步 `plugins/dsh-mathmodel/src/version.js` 白名单（先回归 Remote、Slot、Input Trigger、Conversation 与 Preset 行为，不要直接放宽版本门）。
-  2. `npm run prepare-runtime && npm run dist:win`。
-  3. 更新前备份 profile 的 `package.json` 与 `cordis.patch.yml`；插件失效可用旧版本号钉回。
+新版本通过 HTTPS 下载并验证 SHA-256、文件大小、应用身份及版本。退出旧进程后切换完整应用目录；新版宿主、插件和 GUI 验证失败时自动恢复此前版本。菜单“恢复上一个版本”使用经校验的完整旧版，替代旧的运行时覆盖快照。
+
+旧 0.1.0 没有接入这一入口。首次迁移由维护者运行 `scripts/bootstrap-installed-desktop.mjs` 自动完成：核验 0.1.1 ZIP 和 NSIS 成品，备份个人数据，在原安装路径切换完整应用目录，保持桌面快捷方式目标不变。新版启动失败时先恢复个人数据，再启动旧版；不运行可能删除个人数据的旧卸载器。隔离夹具的失败恢复和成功启动均已通过，本机原有个人安装也已迁移至 0.1.1 并通过 GUI 健康检查；旧程序及个人数据备份保留。用户无需手动解压 ZIP。此后日常更新由 0.1.1 应用内入口处理。发行渠道仍需上传 `desktop-update.json` 和对应 Windows ZIP；目前尚未发布在线更新。
+
+```sh
+node scripts/update-kernel.mjs --check   # 只读取本地锁定的版本
+```
+
+维护者修改内核版本后，需回归插件版本门、重新构建和验证完整安装包，再发布这个桌面发行版。旧维护脚本的无参、`--auto`、`--plugins`、`--rollback` 已拒绝执行，避免未经验证地改写内核或个人配置。
+
+发布前可运行 `node scripts/publish-desktop-release.mjs --plan`，在本地校验 ZIP、NSIS、更新清单、校验表和发布说明；此模式不读取凭据，也不写入 GitHub。实际发布需先确认源码提交与远端 `v0.1.1` 标签一致，并获得公开发布授权。详见[发布验证](docs/desktop-updates-verification.md#发布边界)。
+
+更新与回滚的实现和实测范围见 [桌面更新验证](docs/desktop-updates-verification.md)。
 
 ## 安全模型
 
@@ -70,3 +81,7 @@ npm run dist:win         # dist/*.exe（nsis）+ *.zip
 - 未签名构建：Windows 有 SmartScreen 提示（更多信息 → 仍要运行）。
 - 数学建模论文工具链（Python 科学计算、XeLaTeX、Draw.io、Poppler）不在安装包内，由插件的依赖预检在本机检测。
 - 远程隧道（`dsh-remote-web-ui`）开箱可用 Windows x64 的 cloudflared 二进制。
+
+测试分层、环境路径与 rc.3 回归证据见 [测试与适配记录](docs/test-fixtures-rc3.md)。自定义 mathmodel/imagegen/editable-ppt 预设由用户维护，不随插件分发。
+
+完整 Profile 与 Windows 包的验证命令和结果见 [Windows 分发验证](docs/windows-rc3-verification.md)。
