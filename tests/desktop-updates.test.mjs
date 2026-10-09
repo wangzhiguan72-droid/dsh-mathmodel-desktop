@@ -72,6 +72,18 @@ test('metadata checks never download and a bad SHA never changes the current app
   assert.deepEqual(fs.readdirSync(root).sort(), ['app', 'data']);
 });
 
+test('an absent update feed preserves its HTTP status for the update UI', async t => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(404); response.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  });
+  await assert.rejects(checkForUpdate({ feedUrl: `http://127.0.0.1:${server.address().port}/feed`,
+    currentVersion: '0.1.1', allowLoopbackHttp: true }), error => error.statusCode === 404);
+});
+
 test('missing, truncated and extra extracted files reject the whole release', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-extracted-update-test-'));
   t.after(() => { assert.equal(path.dirname(root), os.tmpdir()); fs.rmSync(root, { recursive: true, force: true }); });

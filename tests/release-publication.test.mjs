@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { planRelease, publishRelease } from '../scripts/publish-desktop-release.mjs';
 
 const tempRoots = [];
-const tag = 'v0.1.1';
+const tag = 'v0.1.2';
 const owner = 'wangzhiguan72-droid/dsh-mathmodel-desktop';
 const commit = 'a'.repeat(40);
 const digest = data => createHash('sha256').update(data).digest('hex');
@@ -22,8 +22,8 @@ afterEach(() => {
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-release-publication-'));
   tempRoots.push(root);
-  const zipName = 'dsh-mathmodel-desktop-0.1.1-win-x64.zip';
-  const exeName = 'dsh-mathmodel-desktop-0.1.1-win-x64.exe';
+  const zipName = 'dsh-mathmodel-desktop-0.1.2-win-x64.zip';
+  const exeName = 'dsh-mathmodel-desktop-0.1.2-win-x64.exe';
   const zip = Buffer.alloc(1_000_001, 23), exe = Buffer.alloc(1_000_003, 42);
   fs.writeFileSync(path.join(root, zipName), zip);
   fs.writeFileSync(path.join(root, exeName), exe);
@@ -35,19 +35,19 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), `${zipHash}  ${zipName}\n${exeHash}  ${exeName}\n`);
   fs.writeFileSync(path.join(root, 'desktop-update.json'), JSON.stringify({
     schema: 'dsh.desktop-update/v1', appId: 'com.deepseek.harness.mathmodel',
-    channel: 'stable', version: '0.1.1', windows: { x64: {
+    channel: 'stable', version: '0.1.2', windows: { x64: {
       url: `https://github.com/${owner}/releases/download/${tag}/${zipName}`,
       sha256: zipHash, bytes: zip.length,
     } },
   }));
-  fs.writeFileSync(path.join(root, 'release-notes-0.1.1.txt'), 'Verified release notes.\n');
+  fs.writeFileSync(path.join(root, 'release-notes-0.1.2.txt'), 'Verified release notes.\n');
   return root;
 }
 
 function miniPlan() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-release-api-'));
   tempRoots.push(root);
-  const files = ['one.zip', 'two.exe', 'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.1.txt']
+  const files = ['one.zip', 'two.exe', 'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.2.txt']
     .map((name, index) => {
       const data = Buffer.from(`asset-${index}-${name}`), filename = path.join(root, name);
       fs.writeFileSync(filename, data);
@@ -126,9 +126,9 @@ test('offline plan validates five local assets without requesting credentials', 
   const root = fixture();
   const plan = planRelease(root);
   assert.deepEqual(plan.files.map(file => file.name), [
-    'dsh-mathmodel-desktop-0.1.1-win-x64.zip',
-    'dsh-mathmodel-desktop-0.1.1-win-x64.exe',
-    'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.1.txt',
+    'dsh-mathmodel-desktop-0.1.2-win-x64.zip',
+    'dsh-mathmodel-desktop-0.1.2-win-x64.exe',
+    'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.2.txt',
   ]);
   const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/publish-desktop-release.mjs');
   const output = JSON.parse(execFileSync(process.execPath, [script, '--release-dir', root, '--plan'],

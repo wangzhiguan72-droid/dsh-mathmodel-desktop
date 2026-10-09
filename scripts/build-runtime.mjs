@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchGitGraphProfile } from './patch-git-graph.mjs';
+import { patchDesktopUpdateProfile } from './patch-desktop-update-entry.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
@@ -332,6 +333,7 @@ async function main() {
   stage('host');
   stage('profile-web');
   await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));
+  await patchDesktopUpdateProfile(path.join(stagingRoot, 'profile-web'));
   await stageCloudflaredWindowsBinary();
   assertRuntimeEntrypoints();
 

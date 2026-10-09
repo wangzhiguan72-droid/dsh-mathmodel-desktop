@@ -13,7 +13,6 @@ const http = require('node:http');
 const { createHash, randomUUID } = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { Readable } = require('node:stream');
 
 const execFileAsync = promisify(execFile);
 const APP_ID = 'com.deepseek.harness.mathmodel';
@@ -71,7 +70,8 @@ function getStream(url, allowLoopbackHttp = false, redirects = 0) {
         resolve(getStream(next, allowLoopbackHttp, redirects + 1));
       } else if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`Update server returned HTTP ${response.statusCode}`));
+        reject(Object.assign(new Error(`Update server returned HTTP ${response.statusCode}`),
+          { statusCode: response.statusCode }));
       } else resolve(response);
     });
     request.on('timeout', () => request.destroy(new Error('Update request timed out')));
@@ -79,32 +79,59 @@ function getStream(url, allowLoopbackHttp = false, redirects = 0) {
   });
 }
 
-async function getChromiumStream(url, allowLoopbackHttp, redirects) {
-  const controller = new AbortController();
-  let timer;
-  const reset = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => controller.abort(new Error('Update request timed out')), 20000);
-    timer.unref();
-  };
-  reset();
-  try {
-    const response = await require('electron').net.fetch(url, { redirect: 'manual',
-      signal: controller.signal, bypassCustomProtocolHandlers: true });
-    if ([301, 302, 307, 308].includes(response.status)) {
-      const next = new URL(response.headers.get('location') || '', url).href;
-      await response.body?.cancel(); clearTimeout(timer);
-      return getStream(next, allowLoopbackHttp, redirects + 1);
-    }
-    if (response.status !== 200) {
-      await response.body?.cancel();
-      throw new Error(`Update server returned HTTP ${response.status}`);
-    }
-    const stream = response.body ? Readable.fromWeb(response.body) : Readable.from([]);
-    stream.on('readable', reset);
-    stream.once('close', () => clearTimeout(timer));
-    return stream;
-  } catch (error) { clearTimeout(timer); throw error; }
+function getChromiumStream(url, allowLoopbackHttp, redirects) {
+  return new Promise((resolve, reject) => {
+    // Electron's manual fetch cancels redirects before exposing a Response.
+    // ClientRequest exposes each target synchronously, so it can be checked
+    // before Chromium follows it through the system proxy.
+    const request = require('electron').net.request({ url, redirect: 'manual',
+      bypassCustomProtocolHandlers: true });
+    let response, timer, settled = false, currentUrl = url;
+    const clear = () => clearTimeout(timer);
+    const fail = error => {
+      clear();
+      if (response) response.destroy(settled ? error : undefined);
+      if (!settled) { settled = true; reject(error); }
+      request.abort();
+    };
+    const reset = () => {
+      clear();
+      timer = setTimeout(() => fail(new Error('Update request timed out')), 20000);
+      timer.unref();
+    };
+    request.on('redirect', (_status, _method, redirectUrl) => {
+      try {
+        if (++redirects > 3) throw new Error('Too many update redirects');
+        const next = new URL(redirectUrl, currentUrl).href;
+        checkedUrl(next, allowLoopbackHttp);
+        currentUrl = next;
+        request.followRedirect();
+        reset();
+      } catch (error) { fail(error); }
+    });
+    request.on('response', incoming => {
+      response = incoming;
+      if (incoming.statusCode !== 200) {
+        fail(Object.assign(new Error(`Update server returned HTTP ${incoming.statusCode}`),
+          { statusCode: incoming.statusCode }));
+        return;
+      }
+      incoming.on('readable', reset);
+      incoming.once('end', clear);
+      incoming.once('close', clear);
+      incoming.once('error', clear);
+      incoming.once('aborted', () => incoming.destroy(new Error('Update response aborted')));
+      settled = true;
+      reset();
+      resolve(incoming);
+    });
+    request.on('error', error => {
+      if (!settled) fail(error);
+      else if (response && !response.destroyed) response.destroy(error);
+    });
+    reset();
+    request.end();
+  });
 }
 
 async function fetchSmallJson(url, allowLoopbackHttp) {

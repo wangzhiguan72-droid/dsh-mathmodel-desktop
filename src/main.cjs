@@ -116,7 +116,8 @@ function startHost(runtime, home, port, profileName) {
   }
   const child = spawn(runtime.nodeBin, args, {
     cwd: home,
-    env: childEnv(home, runtime.nodeHome, process.platform, process.env, nodePaths),
+    env: { ...childEnv(home, runtime.nodeHome, process.platform, process.env, nodePaths),
+      DSH_DESKTOP_MANAGED_UPDATES: '1' },
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });

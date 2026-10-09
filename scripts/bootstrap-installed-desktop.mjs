@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const { extractFile, uncache } = require('@electron/asar');
 const updates = require('../src/desktop-updates.cjs');
 const worker = require('../src/update-worker.cjs');
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const PACKAGE = 'dsh-mathmodel-desktop';
 const executablePattern = /^Uninstall .+\.exe$/i;
 

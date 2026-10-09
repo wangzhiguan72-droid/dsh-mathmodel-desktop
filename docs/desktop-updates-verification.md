@@ -1,8 +1,18 @@
 # 桌面更新与回滚（2026-10-09）
 
-桌面版本更新至 0.1.1，内置 Harness 保持已适配的 0.1.5-rc.3。更新入口在 GUI 左下角：平时显示当前桌面版本，发现新版后用黄色突出显示；点击查看版本及说明，确认后才下载，准备完成后再次确认安装和重启。菜单可检查更新、恢复上一版或修改更新源，也可以关闭启动时检查。
+当前桌面修复包为 0.1.2，内置 Harness 保持已适配的 0.1.5-rc.3。Harness 原有的 GUI 左下角更新按钮现接入桌面更新：平时显示当前桌面版本，发现新版后突出显示；点击查看版本及说明，确认后才下载，准备完成后再次确认安装和重启。菜单可检查更新、恢复上一版或修改更新源，也可以关闭启动时检查。
 
 更新清单属于本桌面发行版，默认地址为本仓库 GitHub Release 的 `desktop-update.json`。它不读取 npm 最新版，不放宽插件版本门。维护脚本只保留读取本地版本的 `--check`；旧无参、自动升级、插件升级和仅 host 回滚均返回错误。
+
+## 0.1.2 侧栏更新入口修复
+
+此前 0.1.1 的原生桌面更新角标与 Harness 自带的左下角更新按钮并存，用户点击后者仍可能看到 pnpm 更新流程。0.1.2 将固定版本的 web 组件接入 Electron 的 `getState`、`onState`、`open` 桥，由同一桌面确认窗口控制下载与安装；原生角标仅在旧版或自定义 web 界面没有接入该按钮时显示。桌面宿主的旧更新状态接口仍返回 HTTP 200，但标记为 `mode: desktop`、`outdated: false`；旧执行接口返回 HTTP 409 `desktop-managed`，阻止从桌面侧栏执行 pnpm。普通 CLI 与浏览器环境保留原行为。
+
+实际打包 GUI 验证确认原左下角按钮接入、备用角标隐藏、13 个子插件健康且无降级；模拟可用版本时按钮高亮、点击打开桌面更新确认窗口，选择“稍后”时没有下载。默认线上清单尚未发布时，检查结果为“更新源尚未提供更新清单”，按钮不高亮。记录见 `dist/update-entry-fixed-0.1.2/gui-update-entry-verification.json`。Chromium 网络请求改为逐跳检查地址后主动跟随，真实 Electron 测试通过三次安全重定向，并拒绝超出上限、跳到 HTTP 或带 URL 凭据的地址。
+
+0.1.2 的 `dist/update-entry-fixed-0.1.2` 成品已核对 43,557 个 ZIP/NSIS 条目 CRC、14 个 ZIP 关键文件、6 个 NSIS 改动文件及源码与包内接线一致性。桌面测试 `node --test --test-concurrency=1 tests/*.test.mjs` 为 123/123，无跳过；原始输出见该目录的 `desktop-tests.txt`。
+
+本机个人安装随后从 0.1.1 升至 0.1.2：旧进程自行退出后，更新助手核对并切换完整应用目录，启动新版且通过宿主健康检查。助手退出后新版 GUI 进程仍在，EXE 产品版本为 0.1.2.0、`app.asar` SHA-256 与最终成品一致、注册表显示版本为 0.1.2，桌面快捷方式目标和参数保持不变。5 个受保护配置文件 SHA-256 未变，5 个会话文件逐字节一致，共享技能联接未变；旧程序整树保存在 `C:\Users\Administrator\AppData\Local\Programs\.dsh-previous-fe0e5735-1957-4a28-b427-276702f87a82`。交易记录与独立复核分别见 `dist/update-entry-fixed-0.1.2/personal-update-repair.json` 和 `personal-repair-independent-check.json`。该本机升级使用经校验的完整包自动替换，用户没有手动解压。
 
 ## 实现
 
@@ -18,7 +28,7 @@
 - 进程正常退出或由信号终止均可进入恢复；协作退出请求绑定本次 nonce 和 PID，并在退出后清除。连续失败不会复用旧请求。损坏的渠道设置和恢复记录会报错；当前版本与成功更新记录不匹配时拒绝恢复。
 - 恢复旧 GUI 前后发布一次回滚结果；随后的大目录清理只更新本任务诊断，不重复写全局结果，防止覆盖恢复窗口启动的下一轮更新。
 
-## 已完成的验证
+## 既有更新框架与回滚验证（0.1.1 阶段）
 
 `node --test --test-concurrency=1 tests/*.test.mjs`：114/114，通过，无跳过。原始输出位于 `dist/desktop-updates-verified/desktop-tests-release-final-cache.txt`。回归覆盖 HTTP 已响应但宿主尚未就绪、错误端口的令牌地址、等待超时及宿主提前退出；首次迁移的备份、恢复、安全停止和同路径切换后的旧 `app.asar` 身份缓存也有专项测试。
 
@@ -28,7 +38,7 @@
 
 审查发现旧回滚任务清理结束后会重复写全局状态，可能覆盖后来成功的更新。回归测试先复现覆盖，再验证修复；独立复核和更新助手 11/11 测试均通过，清理诊断继续保留在本任务记录。
 
-完整 Electron 程序在独立目录中通过以下验证；内置 runtime 使用同一已验证的 rc.3 包。0.1.2、0.1.3、0.1.4 是程序夹具的测试版本号，未发布，其中 0.1.4 额外注入宿主启动后崩溃。
+以下表格保留此前 0.1.1 更新框架的隔离验证；内置 runtime 使用同一已验证的 rc.3 包。表内 0.1.2、0.1.3、0.1.4 是当时的夹具版本号，与本次真实 0.1.2 修复包是不同的测试对象；0.1.4 额外注入宿主启动后崩溃。
 
 | 场景 | 结果 |
 | --- | --- |
@@ -39,11 +49,11 @@
 
 原始运行记录：`dist/desktop-updates-verified/actual-recovery-detached.txt`。完整证据：`actual-update-rollback.json`，额外目录摘要核对：`complete-tree-recovery.txt`，均位于同一验证目录。测试 GUI、宿主及助手已退出。实际 Electron 中还验证过完整 ZIP 下载、解压及后台校验；拒绝下载时服务端下载计数为零，准备完成选择稍后时当前 GUI 保持运行。左下角高亮截图为该目录的 `desktop-update-badge.png`。
 
-旧的 runtime 合并覆盖快照已移除。最终 0.1.1 ZIP 与 NSIS 已重新生成，并核对源码与包内更新模块、全部 ZIP/NSIS 条目 CRC；43,557 个文件条目一致。成品目录为 `dist/desktop-updates-verified`，校验记录 `verification.json`、`SHA256SUMS.txt`，更新清单 `desktop-update.json` 与实际 ZIP 大小及 SHA-256 一致。安装包签名状态实查为 `NotSigned`，记录为 `signature-status.json`。
+旧的 runtime 合并覆盖快照已移除。历史 0.1.1 ZIP 与 NSIS 已核对源码与包内更新模块、全部 ZIP/NSIS 条目 CRC；43,557 个文件条目一致。成品目录为 `dist/desktop-updates-verified`，校验记录 `verification.json`、`SHA256SUMS.txt`，更新清单 `desktop-update.json` 与该 ZIP 大小及 SHA-256 一致。该候选包未公开发布，已由上文的 0.1.2 成品取代。0.1.1 安装包签名状态实查为 `NotSigned`，记录为 `signature-status.json`。
 
 ## 旧版首次迁移
 
-0.1.0 未内置更新入口。维护者工具 `scripts/bootstrap-installed-desktop.mjs` 先核对现有安装身份及经验证的 0.1.1 ZIP、NSIS 文件哈希；原安装无运行进程且个人数据在快照后未改变时，才在原安装路径切换完整程序目录。原桌面快捷方式继续指向同一路径。工具从经校验的 NSIS 成品提取新版卸载器，不执行旧版卸载器。
+0.1.0 未内置更新入口。历史首次迁移使用当时的 `scripts/bootstrap-installed-desktop.mjs`，先核对现有安装身份及经验证的 0.1.1 ZIP、NSIS 文件哈希；原安装无运行进程且个人数据在快照后未改变时，才在原安装路径切换完整程序目录。原桌面快捷方式继续指向同一路径。工具从经校验的 NSIS 成品提取新版卸载器，不执行旧版卸载器。当前脚本仍只接受 0.1.0 作为来源，但目标已固定为 0.1.2；不能用当前版本直接复现下方的 0.1.1 历史记录。
 
 引导前备份完整 `DSH_HOME` 和 Electron 用户数据，用户数据中的 `desktop-updates` 任务缓存除外。备份保留链接本身，不递归复制或删除其外部目标。Windows 下通过不跟随目标的原生元数据查询区分目录联接、目录符号链接与文件符号链接；修复了目标暂时不存在时的类型误判，以及 PowerShell 5 无法读取超过 260 字符路径的问题。专项快照测试 7/7 通过，原始输出见 `dist/desktop-updates-verified/bootstrap-snapshot-final.txt`。若首次启动失败，恢复程序先恢复个人数据，再启动旧程序。成功后保留原应用目录和数据备份，并单独记录引导结果；0.1.0 不支持新版启动确认协议，因此不能作为菜单中普通的“恢复上一个版本”目标。
 
@@ -55,9 +65,9 @@
 
 ## 发布边界
 
-本地构建和测试不会发布 GitHub Release。线上渠道需同时上传完整 Windows ZIP 和根据实际 ZIP 生成的 `desktop-update.json`。0.1.0 的首次迁移由上述维护者工具在本机执行，日常更新从 0.1.1 起通过左下角入口。历史 0.1.0 NSIS 卸载器带有删除个人目录的旧逻辑，不能用应用内 ZIP 更新或引导工具的结果推断传统 NSIS 覆盖安装安全。
+本地构建和测试不会发布 GitHub Release。线上渠道需同时上传完整 Windows ZIP 和根据实际 ZIP 生成的 `desktop-update.json`。本机 0.1.0 的历史首次迁移由当时的维护者工具执行；0.1.1 起具备桌面更新逻辑，0.1.2 将 Harness 原左下角按钮接入该逻辑。历史 0.1.0 NSIS 卸载器带有删除个人目录的旧逻辑，不能用应用内 ZIP 更新或引导工具的结果推断传统 NSIS 覆盖安装安全。
 
-维护者在仓库根目录运行以下预检；命令已经对当前成品实跑通过，只读取本地文件，不请求 Git 凭据或修改 GitHub：
+维护者在仓库根目录运行以下预检；工具默认检查 `dist/update-entry-fixed-0.1.2`，命令已对当前 0.1.2 的五项成品实跑通过，只读取本地文件，不请求 Git 凭据或修改 GitHub：
 
 ```sh
 node scripts/publish-desktop-release.mjs --plan
@@ -65,8 +75,8 @@ node scripts/publish-desktop-release.mjs --plan
 
 预检逐一核对 ZIP、NSIS、`desktop-update.json`、`SHA256SUMS.txt` 和发布说明，并要求清单中的版本、下载 URL、ZIP 字节数及 SHA-256 与已验证成品一致。发布工具的 14 项离线测试覆盖标签与批准提交不一致、上传失败、资产摘要缺失、续传草稿和请求超时；`node --test tests/release-publication.test.mjs` 已实跑 14/14 通过。这些测试使用模拟的 GitHub 响应，不证明线上发布成功。
 
-公开发布需要先确定与成品对应的源码提交，将 `v0.1.1` 标签指向该提交并验证远端一致，再取得公开发布授权。发布模式必须提供完整提交 SHA；工具先建立草稿，上传五项文件，核对远端每个文件的大小和 SHA-256，再复查标签与草稿身份，最后公开为最新版本。已有草稿需明确提供草稿 ID 才能续传；任一核对失败时不执行发布步骤。工具返回发布状态后，还需匿名读取线上最新 Release 与实际 `desktop-update.json`，确认下载可用，才可声称应用内渠道上线。目前这一步尚未执行。
+公开发布需要先确定与 0.1.2 成品对应的源码提交，将 `v0.1.2` 标签指向该提交并验证远端一致，再取得公开发布授权。发布模式必须提供完整提交 SHA；工具先建立草稿，上传五项文件，核对远端每个文件的大小和 SHA-256，再复查标签与草稿身份，最后公开为最新版本。已有草稿需明确提供草稿 ID 才能续传；任一核对失败时不执行发布步骤。工具返回发布状态后，还需匿名读取线上最新 Release 与实际 `desktop-update.json`，确认下载可用，才可声称应用内渠道上线。目前这一步尚未执行。
 
-2026-10-08 读取 GitHub 发行状态：最新为 v0.1.0，未附 `desktop-update.json`；记录为 `dist/desktop-updates-verified/release-access.json`。0.1.1 的本地清单与成品尚未上传或发布。2026-10-06 的默认清单地址 HTTP 404 是历史检查结果，见 `channel-status.json`，不能用它代替新的线上可用性验证。
+2026-10-08 读取 GitHub 发行状态：最新为 v0.1.0，未附 `desktop-update.json`；记录为 `dist/desktop-updates-verified/release-access.json`。0.1.1 候选包未发布，当前 0.1.2 的本地清单与成品也未上传或发布。2026-10-06 的默认清单地址 HTTP 404 是历史检查结果，见 `channel-status.json`；0.1.2 实际 GUI 再次确认当前清单缺失时给出明确提示，不能把本地预检当成线上渠道可用。
 
 下载完整性使用 HTTPS 与清单 SHA-256；本项目尚无代码签名或独立签名密钥。NSIS 原版本卸载器参与的安装覆盖升级，与上述应用内 ZIP 更新为不同路径，不能用本项结果代替所有历史版本覆盖安装测试。

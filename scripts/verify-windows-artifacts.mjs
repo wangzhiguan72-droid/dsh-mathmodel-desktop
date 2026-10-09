@@ -31,11 +31,14 @@ const required = [
   'resources/runtime/profile-web/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-client-ui-git-graph/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/index.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/package.json',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/lib/index.js',
 ];
 const compareFromZip = [
+  productExe,
   'resources/app.asar',
   'resources/runtime/VERSION.json',
   'resources/runtime/node/npm.cmd',
@@ -44,6 +47,8 @@ const compareFromZip = [
   'resources/runtime/profile-web/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-client-ui-git-graph/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/index.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/package.json',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/lib/index.js',
@@ -118,7 +123,7 @@ function unpackedFiles(root) {
 }
 
 function zipBytes(zip, entry) {
-  return run7z(['x', '-so', '-y', zip, entry], 64 * 1024 * 1024);
+  return run7z(['x', '-so', '-y', zip, entry], 512 * 1024 * 1024);
 }
 
 function sha256(bytes) {

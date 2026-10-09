@@ -4,6 +4,20 @@
 // the upstream GUI bundle or expose local files to the host page.
 const { contextBridge, ipcRenderer } = require('electron');
 
+// The bundled sidebar uses the same controlled update flow as the desktop
+// menu. Keep its bridge limited to state and the existing confirmation UI.
+if (/^https?:$/.test(location.protocol) && ['127.0.0.1', 'localhost'].includes(location.hostname)) {
+  contextBridge.exposeInMainWorld('desktopUpdates', {
+    getState: () => ipcRenderer.invoke('desktop:update-state'),
+    open: () => ipcRenderer.invoke('desktop:update-open'),
+    onState: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on('desktop:update-status', listener);
+      return () => ipcRenderer.removeListener('desktop:update-status', listener);
+    },
+  });
+}
+
 contextBridge.exposeInMainWorld('desktop', {
   onStatus: (callback) => {
     ipcRenderer.on('desktop:status', (_event, text) => callback(text));
@@ -45,8 +59,14 @@ window.addEventListener('DOMContentLoaded', () => {
     badge.dataset.phase = value.phase;
   }
   document.body.append(badge);
-  new MutationObserver(() => { if (!badge.isConnected) { document.body.append(badge); render(state); } })
-    .observe(document.body, { childList: true });
+  function syncSidebar() {
+    // Retain a fallback for older/custom browser bundles while giving the
+    // native sidebar seat precedence when it is available.
+    badge.hidden = Boolean(document.querySelector('[data-desktop-update-entry="true"]'));
+    if (!badge.isConnected) { document.body.append(badge); render(state); }
+  }
+  syncSidebar();
+  new MutationObserver(syncSidebar).observe(document.body, { childList: true, subtree: true });
   ipcRenderer.on('desktop:update-status', (_event, value) => render(value));
   void ipcRenderer.invoke('desktop:update-state').then(render);
 });

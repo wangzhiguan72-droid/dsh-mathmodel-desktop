@@ -80,7 +80,7 @@ test('bootstrap identity reads the current archive after replacement at the same
 test('tampered release artifact fails receipt verification before installation or data writes', async () => {
   const f = setup();
   try {
-    const names = ['dsh-mathmodel-desktop-0.1.1-win-x64.zip', 'dsh-mathmodel-desktop-0.1.1-win-x64.exe'];
+    const names = ['dsh-mathmodel-desktop-0.1.2-win-x64.zip', 'dsh-mathmodel-desktop-0.1.2-win-x64.exe'];
     const receipts = {};
     for (const name of names) {
       const bytes = Buffer.alloc(1000001, name.endsWith('.zip') ? 31 : 47);

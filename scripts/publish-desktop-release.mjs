@@ -7,10 +7,10 @@ import { releaseFiles } from './bootstrap-installed-desktop.mjs';
 
 const OWNER = 'wangzhiguan72-droid';
 const REPO = 'dsh-mathmodel-desktop';
-const TAG = 'v0.1.1';
+const TAG = 'v0.1.2';
 const BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const RELEASE_URL = `https://github.com/${OWNER}/${REPO}/releases/${TAG}`;
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const API_VERSION = '2026-03-10';
 const MAX_JSON_BYTES = 1024 * 1024;
 
@@ -325,7 +325,7 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
 }
 
 function cliArgs(argv) {
-  const parsed = { releaseDir: path.resolve('dist', 'desktop-updates-verified'), publish: false, plan: false };
+  const parsed = { releaseDir: path.resolve('dist', 'update-entry-fixed-0.1.2'), publish: false, plan: false };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--plan') { parsed.plan = true; continue; }

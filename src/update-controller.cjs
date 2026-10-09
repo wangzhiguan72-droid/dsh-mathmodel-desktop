@@ -57,6 +57,7 @@ function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow
       return state;
     }
     busy = true;
+    release = null;
     publish({ phase: 'checking', detail: '正在检查桌面发行版…' });
     try {
       if (settingsError) throw settingsError;
@@ -68,7 +69,9 @@ function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow
       if (manual && !release) await dialog.showMessageBox(getWindow(), {
         type: 'info', title: '桌面更新', message: state.detail, buttons: ['知道了'] });
     } catch (error) {
-      publish({ phase: 'error', detail: '暂时无法检查更新：' + error.message });
+      publish({ phase: 'error', availableVersion: undefined,
+        detail: error.statusCode === 404 ? '更新源尚未提供更新清单，当前版本可以继续使用。'
+          : '暂时无法检查更新：' + error.message });
       log('[desktop] update check: ' + error.message);
       if (manual) await dialog.showMessageBox(getWindow(), {
         type: 'info', title: '桌面更新', message: state.detail,

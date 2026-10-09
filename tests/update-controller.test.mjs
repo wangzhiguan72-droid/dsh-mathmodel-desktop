@@ -79,3 +79,21 @@ test('corrupt startup records show a diagnostic without an unhandled rejection o
   assert.match(controller.getState().detail, /malformed desktop update record/);
   assert.equal(calls.some(([name]) => name === 'check'), false);
 });
+
+test('missing release feed clears stale availability without offering an upstream update', async t => {
+  let checks = 0;
+  const { controller, calls } = await fixture(t, [], undefined, {
+    checkForUpdate: async () => {
+      if (++checks === 1) return { available: true, release: { version: '0.1.2' } };
+      throw Object.assign(new Error('Update server returned HTTP 404'), { statusCode: 404 });
+    },
+  });
+  await controller.check();
+  assert.equal(controller.getState().phase, 'available');
+  await controller.check();
+  assert.equal(controller.getState().phase, 'error');
+  assert.equal(controller.getState().availableVersion, undefined);
+  assert.match(controller.getState().detail, /尚未提供更新清单/);
+  await controller.open();
+  assert.equal(calls.some(([name]) => ['prepare', 'worker-ready', 'quit'].includes(name)), false);
+});
