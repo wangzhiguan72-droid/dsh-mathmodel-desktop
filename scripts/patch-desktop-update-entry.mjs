@@ -4,8 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const version = '0.3.23'
-const names = ['@linxin666/dsh-web-all', '@linxin666/dsh-remote-web-ui']
+const legacyNames = ['@linxin666/dsh-web-all', '@linxin666/dsh-remote-web-ui']
 const marker = 'function DesktopUpdateEntry({ wide }) {'
 const clientAnchor = '\t\tfunction UpdateEntry({ wide, t }) {'
 const statusAnchor = '\t\twriteJson(res, 200, await deps.check());'
@@ -62,8 +61,12 @@ export function patchDesktopClientSource(source) {
     }
     return source
   }
+  const entry = source.includes('var update_module_css_default =')
+    ? desktopEntry.replaceAll('remote_module_css_default', 'update_module_css_default')
+      .replaceAll('IconDownloadOutline16', 'IconDownloadOutlineRegular')
+    : desktopEntry
   return replaceOne(source, clientAnchor,
-    desktopEntry + clientAnchor + '\n\t\t\tif (typeof window !== "undefined" && window.desktopUpdates && typeof window.desktopUpdates.getState === "function" && typeof window.desktopUpdates.onState === "function" && typeof window.desktopUpdates.open === "function") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DesktopUpdateEntry, { wide });')
+    entry + clientAnchor + '\n\t\t\tif (typeof window !== "undefined" && window.desktopUpdates && typeof window.desktopUpdates.getState === "function" && typeof window.desktopUpdates.onState === "function" && typeof window.desktopUpdates.open === "function") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DesktopUpdateEntry, { wide });')
 }
 
 export function patchDesktopServerSource(source) {
@@ -79,6 +82,14 @@ export function patchDesktopServerSource(source) {
 }
 
 export async function patchDesktopUpdateProfile(profileDir) {
+  const aggregatePath = path.join(profileDir, 'node_modules', '@linxin666', 'dsh-web-all')
+  const aggregate = JSON.parse(await readFile(path.join(aggregatePath, 'package.json'), 'utf8'))
+  if (aggregate.name !== '@linxin666/dsh-web-all' || !['0.3.23', '0.4.5'].includes(aggregate.version)) {
+    throw new Error(`Unsupported desktop update family: ${aggregate.name}@${aggregate.version}`)
+  }
+  const version = aggregate.version
+  const names = version === '0.4.5' ? ['@linxin666/dsh-web-all', '@linxin666/dsh-update'] : legacyNames
+  const serverName = version === '0.4.5' ? 'dsh-update' : 'dsh-remote-web-ui'
   const candidates = []
   for (const name of names) {
     const packageDir = path.join(profileDir, 'node_modules', ...name.split('/'))
@@ -90,7 +101,7 @@ export async function patchDesktopUpdateProfile(profileDir) {
     const before = await readFile(clientPath, 'utf8')
     candidates.push({ file: clientPath, before, after: patchDesktopClientSource(before) })
   }
-  const serverPath = path.join(profileDir, 'node_modules', '@linxin666', 'dsh-remote-web-ui', 'lib', 'index.js')
+  const serverPath = path.join(profileDir, 'node_modules', '@linxin666', serverName, 'lib', 'index.js')
   const before = await readFile(serverPath, 'utf8')
   candidates.push({ file: serverPath, before, after: patchDesktopServerSource(before) })
   // Every pinned package and anchor is validated before the first write.

@@ -1,0 +1,36 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+#
+# 数学建模桌面版接线：官方 ui-skill 面板由外置 dsh-mathmodel 卡片系统接管，
+# 避免同名双注册；mathmodel Host 插件提供凭据/设置/预检/视觉与受控生图，
+# mathmodel-tools 提供所有 Agent 模式共用的生图与视觉工具。
+- id: ui-skill
+  name: '@deepseek-ai/dsh-client-ui-skill'
+  disabled: true
+
+# 会话遥测：整行关闭。官方默认 FEEDBACK_ONLY（只有你手动 /feedback 时才上传），
+# 但上传内容是未脱敏的原始会话记录、目标是 harness-telemetry.deepseeksvc.com。
+# 注意 config 关不掉这一行，只能按 id 打 disabled——这是官方注释里说明的加载器行为。
+- id: session-telemetry-otel
+  name: '@deepseek-ai/dsh-session-telemetry-otel'
+  disabled: true
+
+# Claude Code 钩子桥：跑你现有 hooks.json 里的 command 钩子子集。
+# 可阻塞提示词/工具、附加上下文、强制继续；http / mcp_tool / prompt / agent
+# 四类 handler 会被跳过。通过所选 DSH_HOME 解析绝对路径，避免固定到构建者账户。
+- id: hooks-claude-code
+  name: '@deepseek-ai/dsh-hooks-claude-code'
+  config:
+    configPath: !!js dshHomePath('hooks.json')
+
+- insert:
+    - id: mathmodel
+      name: '@deepseek-harness/dsh-mathmodel'
+      inject:
+        - credentials
+        - settings
+      config:
+        skillRoot: !!js dshHomePath('skills')
+    - id: mathmodel-tools
+      name: '@deepseek-harness/dsh-mathmodel/tools'

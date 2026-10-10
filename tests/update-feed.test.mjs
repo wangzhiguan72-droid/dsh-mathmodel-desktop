@@ -73,6 +73,35 @@ test('CLI creates the same manifest without importing or publishing anything', t
   assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).version, '0.1.1');
 });
 
+test('two-hop manifest pins both independent ZIPs and rejects incomplete upgrade inputs', async t => {
+  const { root, zip, out, args } = fixture(t);
+  const kernelZip = path.join(root, 'kernel.zip');
+  fs.writeFileSync(kernelZip, tinyZip());
+  const set = (items, flag, value) => items.map((item, index) => items[index - 1] === flag ? value : item);
+  const bridgeArgs = set(args, '--version', '0.1.3-bridge.1');
+  const upgrade = ['--upgrade-zip', kernelZip, '--upgrade-version', '0.1.3',
+    '--upgrade-min-version', '0.1.3-bridge.1', '--upgrade-url',
+    'https://github.com/owner/repo/releases/download/v0.1.3/kernel.zip'];
+  const feed = await createUpdateFeed([...bridgeArgs, ...upgrade]);
+  assert.equal(feed.version, '0.1.3-bridge.1');
+  assert.equal(feed.upgrades.length, 1);
+  assert.equal(feed.upgrades[0].version, '0.1.3');
+  assert.equal(feed.upgrades[0].minVersion, '0.1.3-bridge.1');
+  assert.equal(feed.windows.x64.sha256, createHash('sha256').update(fs.readFileSync(zip)).digest('hex'));
+  assert.equal(feed.upgrades[0].windows.x64.sha256,
+    createHash('sha256').update(fs.readFileSync(kernelZip)).digest('hex'));
+  const saved = fs.readFileSync(out, 'utf8');
+  for (const invalid of [
+    [...bridgeArgs, '--upgrade-zip', kernelZip],
+    [...bridgeArgs, ...set(upgrade, '--upgrade-min-version', '0.1.2')],
+    [...bridgeArgs, ...set(upgrade, '--upgrade-version', '0.1.3-bridge.1')],
+    [...bridgeArgs, ...set(upgrade, '--upgrade-url', 'http://example.test/kernel.zip')],
+  ]) {
+    await assert.rejects(createUpdateFeed(invalid));
+    assert.equal(fs.readFileSync(out, 'utf8'), saved);
+  }
+});
+
 test('invalid versions, URLs, options and ZIPs leave an existing manifest untouched', async t => {
   const { zip, out, args } = fixture(t);
   fs.writeFileSync(out, 'existing feed');

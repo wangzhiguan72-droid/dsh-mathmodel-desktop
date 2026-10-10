@@ -14,7 +14,7 @@ function validateFeedUrl(value) {
   return url.href;
 }
 
-function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow, getNodeBin, log,
+function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow, getNodeBin, getHomeDir, log,
   core = updates, settingsDefaults = defaults }) {
   let state = { phase: 'idle', currentVersion: app.getVersion(), detail: '' };
   let release = null, prepared = null, busy = false, settingsWindow = null;
@@ -46,7 +46,7 @@ function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow
   function identity() {
     return { installDir: path.dirname(app.getPath('exe')), executableName: path.basename(app.getPath('exe')),
       packageName: require('../package.json').name, appId: settingsDefaults.appId,
-      userDataDir: app.getPath('userData'), currentVersion: app.getVersion() };
+      userDataDir: app.getPath('userData'), homeDir: getHomeDir?.(), currentVersion: app.getVersion() };
   }
 
   async function check(manual = false) {
@@ -81,10 +81,14 @@ function createUpdateController({ app, dialog, ipcMain, BrowserWindow, getWindow
   }
 
   async function install(job) {
+    const rollingBackData = job.kind === 'rollback' && Boolean(job.restoreDataSnapshot);
     const answer = await dialog.showMessageBox(getWindow(), { type: 'question', title: '安装桌面更新',
-      message: `现在切换到 ${job.toVersion} 并重启应用吗？`,
-      detail: '应用会关闭并重新启动。新版无法正常启动时，将恢复此前版本。个人配置和项目保留。',
-      buttons: ['安装并重启', '稍后'], defaultId: 1, cancelId: 1 });
+      message: rollingBackData ? `恢复 ${job.toVersion} 及升级前的数据吗？`
+        : `现在切换到 ${job.toVersion} 并重启应用吗？`,
+      detail: rollingBackData
+        ? '会话格式已改变。恢复旧版时，会把会话和配置恢复到升级前；升级后产生的数据将另存备份，不会在旧版中显示。应用随后重启。'
+        : '应用会关闭并重新启动。新版无法正常启动时，将恢复此前版本。个人配置和项目保留。',
+      buttons: [rollingBackData ? '备份当前数据并恢复' : '安装并重启', '稍后'], defaultId: 1, cancelId: 1 });
     if (answer.response !== 0) return;
     publish({ phase: 'installing', detail: '正在准备安全重启…' });
     await core.launchUpdate(job, { nodeBin: getNodeBin(), currentPid: process.pid });

@@ -21,6 +21,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createUpdateController } = require('./update-controller.cjs');
 const { acknowledgeBoot } = require('./desktop-updates.cjs');
+const { assertUpdateBootSafe } = require('./update-boot-safety.cjs');
 const {
   resolveRuntimePaths,
   resolveDshHome,
@@ -35,6 +36,7 @@ const {
   parseTokenUrlLine,
   ensureProfileFallbacks,
   ensureFrameworkCohort,
+  hasCompleteWebFamily,
   checkVcRuntime,
   isProgrammaticLaunch,
 } = require('./runtime.cjs');
@@ -210,6 +212,9 @@ async function showError(message) {
 async function boot() {
   const runtime = resolveRuntimePaths(resourcesRoot(), process.platform, process.arch, app.isPackaged);
   const home = resolveDshHome(process.env, os.homedir());
+  assertUpdateBootSafe({ jobPath: process.env.DSH_DESKTOP_UPDATE_JOB,
+    nonce: process.env.DSH_DESKTOP_UPDATE_NONCE, installDir: path.dirname(app.getPath('exe')),
+    userDataDir: app.getPath('userData'), homeDir: home, version: app.getVersion() });
   pushLogLine('[desktop] dsh home: ' + home);
   pushLogLine('[desktop] Electron user data: ' + app.getPath('userData'));
   pushLogLine('[desktop] Electron session data: ' + app.getPath('sessionData'));
@@ -273,18 +278,13 @@ async function boot() {
   });
   const pendingUpdate = Boolean(process.env.DSH_DESKTOP_UPDATE_JOB);
   // The HTTP listener can answer while the plugin loader is still working.
-  // Updates must wait for the host's authenticated readiness announcement.
+  // Every window needs the host's authenticated readiness announcement.
   await waitForGui(port, { deadlineMs: pendingUpdate ? 15 * 60 * 1000 : READY_TIMEOUT_MS,
     isAlive: () => !exited,
-    ...(pendingUpdate ? { getTokenUrl: () => tokenUrl } : {}),
+    getTokenUrl: () => tokenUrl,
   });
-  // The token URL line can land a moment after the port answers; give it a
-  // short grace period before falling back to the bare (401) URL.
-  for (let waited = 0; tokenUrl === null && waited < 5000; waited += 250) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-  }
-  const target = tokenUrl ?? ('http://127.0.0.1:' + port + '/');
-  pushLogLine('[desktop] GUI ready, loading ' + (tokenUrl === null ? 'the bare URL (no token line seen)' : 'the tokenized URL'));
+  const target = tokenUrl;
+  pushLogLine('[desktop] GUI ready, loading the tokenized URL');
   await mainWindow.loadURL(target);
   pushLogLine('[desktop] GUI loaded');
   if (process.env.DSH_DESKTOP_UPDATE_JOB) {
@@ -303,7 +303,8 @@ async function boot() {
       headers: { cookie }, signal: AbortSignal.timeout(30000),
     });
     const family = rows.ok ? await rows.json() : {};
-    if (!Array.isArray(family.children) || family.children.length !== 13) throw new Error('Updated host plugin family is incomplete');
+    const familyVersion = /^@linxin666\/dsh-web-all@([^\s]+)$/.exec(stamp?.webAll ?? '')?.[1];
+    if (!hasCompleteWebFamily(family, familyVersion || 'unknown')) throw new Error('Updated host plugin family is incomplete');
     if (exited || child.exitCode !== null || child.signalCode !== null) throw new Error('Updated host exited during boot verification');
     await acknowledgeBoot({ jobPath: process.env.DSH_DESKTOP_UPDATE_JOB,
       nonce: process.env.DSH_DESKTOP_UPDATE_NONCE, installDir: path.dirname(app.getPath('exe')),
@@ -383,6 +384,7 @@ app.whenReady().then(() => {
   }
   updateController = createUpdateController({ app, dialog, ipcMain, BrowserWindow,
     getWindow: () => mainWindow,
+    getHomeDir: () => resolveDshHome(process.env, os.homedir()),
     getNodeBin: () => resolveRuntimePaths(resourcesRoot(), process.platform, process.arch, app.isPackaged).nodeBin,
     log: pushLogLine });
   setupDesktopMenu();

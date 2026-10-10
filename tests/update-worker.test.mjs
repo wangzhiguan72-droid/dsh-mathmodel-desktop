@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 const require = createRequire(import.meta.url);
 const { transact, pinOldProcess, treeDigest, treeDigestAsync, stopOrphanedUpdateHosts } = require('../src/update-worker.cjs');
 const { prepareRollback } = require('../src/desktop-updates.cjs');
+const { ensurePrivateDirectory } = require('../src/update-data-snapshot.cjs');
 
 function fixture() {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-desktop-update-worker-')));
@@ -38,27 +39,144 @@ if(process.env.DSH_DESKTOP_UPDATE_JOB){
  if(process.env.DSH_TEST_BOOT_FAIL==='1') process.exit(7);
  fs.writeFileSync(job.bootMarker,JSON.stringify({nonce:job.nonce,pid:process.pid}),{flag:'wx'});
 }
+
 setInterval(()=>{},1000);
 `);
   const children = [];
+  const closedChildren = [];
   const launchApp = (_file, _args, options) => {
     const child = spawn(process.execPath, [appScript], options);
     children.push(child);
+    closedChildren.push(new Promise(resolve => child.once('close', resolve)));
     return child;
   };
   const cleanup = async () => {
     for (const child of children) if (child.exitCode === null) child.kill();
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await Promise.all(closedChildren);
     const physical = fs.realpathSync.native(root);
     assert.equal(physical, root);
     const physicalTmp = fs.realpathSync.native(os.tmpdir());
     assert.equal(path.dirname(root).toLowerCase(), physicalTmp.toLowerCase());
     assert.ok(path.basename(root).startsWith('dsh-desktop-update-worker-'));
-    fs.rmSync(root, { recursive: true, force: true });
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
   return { root, job, launchApp, cleanup };
 }
 
+function sessionFormatFixture(f) {
+  const sessionFile = root => path.join(root, 'resources', 'runtime', 'host', 'node_modules',
+    '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
+  for (const [root, version] of [[f.job.installDir, 3], [f.job.candidateDir, 4]]) {
+    const filename = sessionFile(root);
+    fs.mkdirSync(path.dirname(filename), { recursive: true });
+    fs.writeFileSync(filename, `const SESSION_FORMAT_VERSION = ${version};\n`);
+  }
+  const homeDir = path.join(f.root, 'home');
+  fs.mkdirSync(path.join(homeDir, 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(homeDir, 'sessions', 'conversation.jsonl'), 'old-format-v3\n');
+  fs.writeFileSync(path.join(f.job.userDataDir, 'settings.json'), 'old-user-setting\n');
+  f.job.homeDir = homeDir;
+  f.job.sessionFormatFrom = 3;
+  f.job.sessionFormatTo = 4;
+  f.job.candidateSha256 = treeDigest(f.job.candidateDir);
+  fs.writeFileSync(f.job.jobPath, JSON.stringify(f.job));
+  return { homeDir, session: path.join(homeDir, 'sessions', 'conversation.jsonl'),
+    setting: path.join(f.job.userDataDir, 'settings.json') };
+}
+
+function removeOwnedSnapshots(jobs) {
+  for (const job of jobs) {
+    const record = job?.dataSnapshot;
+    if (!record || record.nonce !== job.nonce
+      || path.basename(record.backup) !== `dsh-desktop-bootstrap-${job.nonce}`
+      || path.dirname(record.backup) !== path.join(os.homedir(), '.dsh-desktop-update-backups')) continue;
+    fs.rmSync(record.backup, { recursive: true, force: true });
+  }
+}
+
+test('first cross-format transaction creates a reusable private backup root', async t => {
+  const f = fixture();
+  sessionFormatFixture(f);
+  const profile = path.join(f.root, 'profile');
+  fs.mkdirSync(profile);
+  const originalHome = os.homedir;
+  os.homedir = () => profile;
+  const backupRoot = path.join(profile, '.dsh-desktop-update-backups');
+  try {
+    assert.equal(fs.existsSync(backupRoot), false);
+    const outcome = await transact(f.job, process.pid, 'fixture', Promise.resolve(),
+      { launchApp: f.launchApp, bootTimeoutMs: 3000 });
+    assert.equal(outcome.state, 'succeeded');
+    assert.equal(path.dirname(outcome.dataSnapshot.backup), backupRoot);
+    assert.equal(fs.lstatSync(backupRoot).isDirectory(), true);
+    const sentinel = path.join(backupRoot, 'sentinel.txt');
+    fs.writeFileSync(sentinel, 'retained');
+    ensurePrivateDirectory(backupRoot);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'retained');
+    removeOwnedSnapshots([f.job]);
+    fs.rmSync(sentinel);
+    fs.rmdirSync(backupRoot);
+    const target = path.join(f.root, 'unrelated-target');
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, backupRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => ensurePrivateDirectory(backupRoot), /Unsafe data directory/);
+    assert.deepEqual(fs.readdirSync(target), []);
+  } finally {
+    removeOwnedSnapshots([f.job]);
+    os.homedir = originalHome;
+    await f.cleanup();
+  }
+});
+
+test('failed V3 to V4 boot restores session and settings bytes before old GUI launches',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = fixture(), data = sessionFormatFixture(f);
+    const appScript = path.join(f.root, 'fake-app.cjs');
+    fs.writeFileSync(appScript, `const fs=require('fs');
+if(process.env.DSH_DESKTOP_UPDATE_JOB){
+ fs.writeFileSync(${JSON.stringify(data.session)}, 'new-format-v4\\n');
+ fs.writeFileSync(${JSON.stringify(data.setting)}, 'new-user-setting\\n');
+ process.exit(7);
+}
+if(fs.readFileSync(${JSON.stringify(data.session)},'utf8') !== 'old-format-v3\\n') process.exit(8);
+setInterval(()=>{},1000);
+`);
+    try {
+      const outcome = await transact(f.job, process.pid, 'fixture', Promise.resolve(),
+        { launchApp: f.launchApp, bootTimeoutMs: 3000 });
+      assert.equal(outcome.state, 'rolled-back');
+      assert.equal(fs.readFileSync(data.session, 'utf8'), 'old-format-v3\n');
+      assert.equal(fs.readFileSync(data.setting, 'utf8'), 'old-user-setting\n');
+      assert.equal(fs.readFileSync(path.join(outcome.dataSnapshot.backup, 'home', 'sessions', 'conversation.jsonl'), 'utf8'), 'old-format-v3\n');
+      assert.equal(fs.existsSync(path.join(f.job.userDataDir, 'desktop-updates', `${f.job.nonce}.job.json`)), true);
+      assert.equal(fs.existsSync(path.join(f.job.installDir, 'resources', 'runtime', 'host', 'node_modules', '@deepseek-ai', 'dsh-session', 'lib', 'index.js')), true);
+    } finally { removeOwnedSnapshots([f.job]); await f.cleanup(); }
+  });
+
+test('manual cross-format rollback preserves new data backup and restores pre-upgrade bytes',
+  { skip: process.platform !== 'win32' }, async () => {
+    const f = fixture(), data = sessionFormatFixture(f);
+    let rollbackJob;
+    try {
+      const updated = await transact(f.job, process.pid, 'fixture', Promise.resolve(),
+        { launchApp: f.launchApp, bootTimeoutMs: 3000 });
+      assert.equal(updated.state, 'succeeded');
+      process.kill(updated.startedNewPid);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      fs.writeFileSync(data.session, 'new-format-v4\n');
+      fs.writeFileSync(data.setting, 'new-user-setting\n');
+      rollbackJob = await prepareRollback({ installDir: f.job.installDir, executableName: 'app.exe',
+        userDataDir: f.job.userDataDir, homeDir: data.homeDir, currentVersion: '0.1.1' });
+      assert.equal(rollbackJob.restoreDataSnapshot.backup, updated.dataSnapshot.backup);
+      const rolledBack = await transact(rollbackJob, process.pid, 'fixture', Promise.resolve(),
+        { launchApp: f.launchApp, bootTimeoutMs: 3000 });
+      assert.equal(rolledBack.state, 'succeeded');
+      assert.equal(fs.readFileSync(data.session, 'utf8'), 'old-format-v3\n');
+      assert.equal(fs.readFileSync(data.setting, 'utf8'), 'old-user-setting\n');
+      assert.equal(fs.readFileSync(path.join(rolledBack.dataSnapshot.backup, 'home', 'sessions', 'conversation.jsonl'), 'utf8'), 'new-format-v4\n');
+      assert.equal(fs.readFileSync(path.join(rolledBack.dataSnapshot.backup, 'user-data', 'settings.json'), 'utf8'), 'new-user-setting\n');
+    } finally { removeOwnedSnapshots([f.job, rollbackJob]); await f.cleanup(); }
+  });
 test('worker pins the original process handle until exit', { skip: process.platform !== 'win32' }, async () => {
   const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
   try {
@@ -224,6 +342,7 @@ setTimeout(()=>process.exit(7),250);
 `);
   const started = Date.now();
   const parent = spawn(process.execPath, [parentScript, copiedNode, f.job.nonce, record], { stdio: 'ignore' });
+  const parentClosed = new Promise(resolve => parent.once('close', resolve));
   let pids;
   try {
     await new Promise((resolve, reject) => { parent.once('exit', resolve); parent.once('error', reject); });
@@ -235,6 +354,12 @@ setTimeout(()=>process.exit(7),250);
   } finally {
     for (const pid of [pids?.tagged, pids?.other]) if (pid) try { process.kill(pid); } catch {}
     if (parent.exitCode === null) parent.kill();
+    await parentClosed;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && [pids?.tagged, pids?.other].some(pid => {
+      if (!pid) return false;
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    })) await new Promise(resolve => setTimeout(resolve, 50));
     await f.cleanup();
   }
 });

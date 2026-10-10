@@ -9,6 +9,15 @@ import { createRequire } from 'node:module';
 import { runBootstrap, releaseFiles } from '../scripts/bootstrap-installed-desktop.mjs';
 
 const asar = createRequire(import.meta.url)('@electron/asar');
+const worker = createRequire(import.meta.url)('../src/update-worker.cjs');
+const { assertUpdateBootSafe } = createRequire(import.meta.url)('../src/update-boot-safety.cjs');
+
+function writeSessionFormat(root, version) {
+  const filename = path.join(root, 'resources', 'runtime', 'host', 'node_modules',
+    '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  fs.writeFileSync(filename, `const SESSION_FORMAT_VERSION = ${version};\n`);
+}
 
 function setup() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bootstrap-cli-'));
@@ -80,7 +89,7 @@ test('bootstrap identity reads the current archive after replacement at the same
 test('tampered release artifact fails receipt verification before installation or data writes', async () => {
   const f = setup();
   try {
-    const names = ['dsh-mathmodel-desktop-0.1.2-win-x64.zip', 'dsh-mathmodel-desktop-0.1.2-win-x64.exe'];
+    const names = ['dsh-mathmodel-desktop-0.1.3-win-x64.zip', 'dsh-mathmodel-desktop-0.1.3-win-x64.exe'];
     const receipts = {};
     for (const name of names) {
       const bytes = Buffer.alloc(1000001, name.endsWith('.zip') ? 31 : 47);
@@ -136,6 +145,41 @@ test('session changed after snapshot aborts before swap without launching either
     assert.equal(fs.readFileSync(path.join(f.paths.home, 'private.txt'), 'utf8'), 'new session after backup');
     assert.equal(fs.readdirSync(f.paths.backups).length, 1);
   } finally { f.cleanup(); }
+});
+
+test('direct V3 to V4 bootstrap supplies a verified snapshot to the new boot guard', async t => {
+  const f = setup();
+  try {
+    writeSessionFormat(f.paths.application, 3);
+    t.mock.method(worker, 'transact', async job => {
+      assert.equal(job.homeDir, f.paths.home);
+      assert.equal(job.sessionFormatFrom, 3);
+      assert.equal(job.sessionFormatTo, 4);
+      assert.equal(job.dataSnapshot.nonce, job.nonce);
+      assert.equal(job.dataSnapshot.home, f.paths.home);
+      assert.equal(job.dataSnapshot.userData, f.paths['user-data']);
+      assert.ok(fs.existsSync(path.join(job.dataSnapshot.backup, 'snapshot.json')));
+      fs.renameSync(job.installDir, job.previousDir);
+      fs.renameSync(job.candidateDir, job.installDir);
+      const boot = { jobPath: job.jobPath, nonce: job.nonce, installDir: job.installDir,
+        userDataDir: f.paths['user-data'], homeDir: f.paths.home, version: '0.1.3' };
+      assert.doesNotThrow(() => assertUpdateBootSafe(boot));
+      const altered = { ...job, dataSnapshot: undefined };
+      fs.writeFileSync(job.jobPath, JSON.stringify(altered));
+      assert.throws(() => assertUpdateBootSafe(boot), /snapshot identity mismatch/);
+      return { ...job, state: 'aborted' };
+    });
+    const result = await runBootstrap({ ...f.args, apply: true }, {
+      allowNonWindows: true, identity: f.identity, release: f.release,
+      activeProcesses: () => [],
+      prepareStage: stage => {
+        const uninstaller = f.prepareStage(stage);
+        writeSessionFormat(stage, 4);
+        return uninstaller;
+      },
+    });
+    assert.equal(result.state, 'aborted');
+  } finally { t.mock.restoreAll(); f.cleanup(); }
 });
 
 test('failed new boot restores private data before launching the legacy desktop despite busy cleanup', { skip: process.platform !== 'win32' }, async t => {

@@ -7,10 +7,13 @@ import { releaseFiles } from './bootstrap-installed-desktop.mjs';
 
 const OWNER = 'wangzhiguan72-droid';
 const REPO = 'dsh-mathmodel-desktop';
-const TAG = 'v0.1.2';
 const BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
-const RELEASE_URL = `https://github.com/${OWNER}/${REPO}/releases/${TAG}`;
-const VERSION = '0.1.2';
+const BRIDGE_VERSION = '0.1.3-bridge.1';
+const KERNEL_VERSION = '0.1.3';
+const RELEASES = Object.freeze({
+  [BRIDGE_VERSION]: { tag: `v${BRIDGE_VERSION}` },
+  [KERNEL_VERSION]: { tag: `v${KERNEL_VERSION}` },
+});
 const API_VERSION = '2026-03-10';
 const MAX_JSON_BYTES = 1024 * 1024;
 
@@ -40,29 +43,49 @@ function asset(filename, expectedHash) {
   return { name: path.basename(filename), path: filename, bytes: stat.size, sha256: digest };
 }
 
-export function planRelease(releaseDir) {
-  const verified = releaseFiles(releaseDir);
+export function planRelease(releaseDir, { version = KERNEL_VERSION, bridgeDir } = {}) {
+  const release = RELEASES[version];
+  if (!release) throw new Error('Unsupported desktop release version');
+  if (version === KERNEL_VERSION && !bridgeDir) throw new Error('Kernel publication requires --bridge-dir');
+  if (version === BRIDGE_VERSION && bridgeDir) throw new Error('Bridge publication cannot include --bridge-dir');
+  const verified = releaseFiles(releaseDir, version);
   const manifestPath = path.join(releaseDir, 'desktop-update.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const expectedUrl = `https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${verified.zip.name}`;
+  const expectedUrl = `https://github.com/${OWNER}/${REPO}/releases/download/${release.tag}/${verified.zip.name}`;
+  const expectedAsset = version === BRIDGE_VERSION ? verified.zip : releaseFiles(bridgeDir, BRIDGE_VERSION).zip;
+  const expectedBaseUrl = version === BRIDGE_VERSION ? expectedUrl
+    : `https://github.com/${OWNER}/${REPO}/releases/download/v${BRIDGE_VERSION}/${expectedAsset.name}`;
   if (manifest.schema !== 'dsh.desktop-update/v1' || manifest.appId !== 'com.deepseek.harness.mathmodel'
-    || manifest.channel !== 'stable' || manifest.version !== VERSION
-    || manifest.windows?.x64?.url !== expectedUrl
-    || manifest.windows.x64.sha256 !== verified.zip.sha256
-    || manifest.windows.x64.bytes !== verified.zip.bytes) {
+    || manifest.channel !== 'stable' || manifest.version !== (version === BRIDGE_VERSION ? version : BRIDGE_VERSION)
+    || manifest.windows?.x64?.url !== expectedBaseUrl
+    || manifest.windows.x64.sha256 !== expectedAsset.sha256
+    || manifest.windows.x64.bytes !== expectedAsset.bytes) {
     throw new Error('Desktop update manifest does not match the verified ZIP and release URL');
+  }
+  if (version === BRIDGE_VERSION) {
+    if (manifest.upgrades !== undefined) throw new Error('Bridge manifest cannot include upgrade routes');
+  } else {
+    const [upgrade] = Array.isArray(manifest.upgrades) ? manifest.upgrades : [];
+    if (!Array.isArray(manifest.upgrades) || manifest.upgrades.length !== 1 || upgrade.schema !== manifest.schema
+      || upgrade.appId !== manifest.appId || upgrade.channel !== manifest.channel
+      || upgrade.minVersion !== BRIDGE_VERSION || upgrade.version !== KERNEL_VERSION
+      || upgrade.windows?.x64?.url !== expectedUrl
+      || upgrade.windows.x64.sha256 !== verified.zip.sha256
+      || upgrade.windows.x64.bytes !== verified.zip.bytes) {
+      throw new Error('Desktop update upgrade route does not match the verified kernel ZIP');
+    }
   }
   const files = [
     asset(verified.zip.entry, verified.zip.sha256),
     asset(verified.nsis.entry, verified.nsis.sha256),
     asset(manifestPath),
     asset(path.join(releaseDir, 'SHA256SUMS.txt')),
-    asset(path.join(releaseDir, `release-notes-${VERSION}.txt`)),
+    asset(path.join(releaseDir, `release-notes-${version}.txt`)),
   ];
   const notes = fs.readFileSync(files[4].path, 'utf8');
   if (!notes.trim()) throw new Error('Release notes are empty');
   return { schema: 'dsh.desktop-release-plan/v1', repository: `${OWNER}/${REPO}`,
-    tag: TAG, version: VERSION, releaseUrl: RELEASE_URL, files, notes };
+    tag: release.tag, version, releaseUrl: `https://github.com/${OWNER}/${REPO}/releases/tag/${release.tag}`, files, notes };
 }
 
 export function readGitCredential() {
@@ -174,9 +197,9 @@ function githubClient(fetchImpl, token, deadlines) {
   };
 }
 
-async function resolveTagCommit(client) {
-  const reference = await client.json('GET', `${BASE}/git/ref/tags/${TAG}`, 'Read release tag');
-  if (reference.ref !== `refs/tags/${TAG}` || !reference.object) throw new Error('Release tag response is invalid');
+async function resolveTagCommit(client, tagName) {
+  const reference = await client.json('GET', `${BASE}/git/ref/tags/${tagName}`, 'Read release tag');
+  if (reference.ref !== `refs/tags/${tagName}` || !reference.object) throw new Error('Release tag response is invalid');
   let object = reference.object;
   for (let depth = 0; depth < 8 && object.type === 'tag'; depth++) {
     if (!/^[a-f0-9]{40}$|^[a-f0-9]{64}$/i.test(object.sha || '')) throw new Error('Annotated tag SHA is invalid');
@@ -189,8 +212,8 @@ async function resolveTagCommit(client) {
   return object.sha.toLowerCase();
 }
 
-function verifyReleaseIdentity(release) {
-  if (!Number.isSafeInteger(release?.id) || release.id <= 0 || release.tag_name !== TAG
+function verifyReleaseIdentity(release, tagName) {
+  if (!Number.isSafeInteger(release?.id) || release.id <= 0 || release.tag_name !== tagName
     || release.draft !== true || release.prerelease !== false) {
     throw new Error('Created release identity is invalid');
   }
@@ -225,26 +248,32 @@ function checkedExistingAssets(remote, local) {
   return present;
 }
 
-async function listedReleases(client) {
+async function listedReleases(client, tagName) {
   const found = [];
   for (let page = 1; page <= 100; page++) {
     const batch = await client.json('GET', `${BASE}/releases?per_page=100&page=${page}`, 'List releases');
     if (!Array.isArray(batch)) throw new Error('Release listing is invalid');
-    found.push(...batch.filter(release => release.tag_name === TAG));
+    found.push(...batch.filter(release => release.tag_name === tagName));
     if (batch.length < 100) return found;
   }
   throw new Error('Release listing exceeded safe pagination limit');
 }
 
 function result(release, plan) {
-  return { state: 'published', releaseId: release.id, url: RELEASE_URL,
+  return { state: 'published', releaseId: release.id, url: plan.releaseUrl,
     assets: plan.files.map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 })),
     onlineManifestVerified: false };
 }
 
-export async function publishRelease({ releaseDir, commit, resumeDraft }, dependencies = {}) {
+export async function publishRelease({ releaseDir, commit, resumeDraft, version = KERNEL_VERSION, bridgeDir }, dependencies = {}) {
   const expectedCommit = validateCommit(commit);
-  const plan = (dependencies.plan || planRelease)(releaseDir);
+  if (!RELEASES[version]) throw new Error('Unsupported desktop release version');
+  const plan = (dependencies.plan || planRelease)(releaseDir, { version, bridgeDir });
+  const tagName = RELEASES[version].tag;
+  if (plan.repository !== `${OWNER}/${REPO}` || plan.tag !== tagName || plan.version !== version
+    || plan.releaseUrl !== `https://github.com/${OWNER}/${REPO}/releases/tag/${tagName}`) {
+    throw new Error('Release plan identity is invalid');
+  }
   const fetchImpl = dependencies.fetch || globalThis.fetch;
   const token = await (dependencies.credential || readGitCredential)();
   if (!token) throw new Error('Git credential is unavailable');
@@ -254,9 +283,9 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
     throw new Error('Request deadline is invalid');
   }
   const client = githubClient(fetchImpl, token, deadlines);
-  const tagCommit = await resolveTagCommit(client);
+  const tagCommit = await resolveTagCommit(client, tagName);
   if (tagCommit !== expectedCommit) throw new Error('Remote release tag does not match the approved commit');
-  const existing = await listedReleases(client);
+  const existing = await listedReleases(client, tagName);
   if (existing.length > 1) throw new Error('Multiple releases use the fixed tag');
   let draft;
   if (resumeDraft !== undefined) {
@@ -265,16 +294,16 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
       throw new Error('Requested draft ID does not match the fixed release tag');
     }
     draft = await client.json('GET', `${BASE}/releases/${id}`, 'Read requested draft');
-    verifyReleaseIdentity(draft);
+    verifyReleaseIdentity(draft, tagName);
   } else {
     if (existing.length) throw new Error(existing[0].draft
       ? `Draft release ${existing[0].id} already exists; inspect it and use --resume-draft ${existing[0].id}`
       : 'Published release already exists; inspect it before publishing');
     try {
       draft = await client.json('POST', `${BASE}/releases`, 'Create draft release', [201],
-        { tag_name: TAG, target_commitish: expectedCommit, name: TAG, body: plan.notes,
+        { tag_name: tagName, target_commitish: expectedCommit, name: tagName, body: plan.notes,
           draft: true, prerelease: false, make_latest: 'false', generate_release_notes: false });
-      verifyReleaseIdentity(draft);
+      verifyReleaseIdentity(draft, tagName);
     } catch (error) {
       throw new Error(`Draft creation outcome unknown: ${error.message}. Inspect release listing before retrying`);
     }
@@ -294,11 +323,11 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
     }
     const listed = await client.json('GET', `${BASE}/releases/${draft.id}/assets?per_page=100`, 'List draft assets');
     verifyAssets(listed, plan.files);
-    if (await resolveTagCommit(client) !== expectedCommit) {
+    if (await resolveTagCommit(client, tagName) !== expectedCommit) {
       throw new Error('Remote release tag changed before publication');
     }
     const beforePublish = await client.json('GET', `${BASE}/releases/${draft.id}`, 'Read draft before publication');
-    verifyReleaseIdentity(beforePublish);
+    verifyReleaseIdentity(beforePublish, tagName);
     if (beforePublish.id !== draft.id) throw new Error('Draft identity changed before publication');
   } catch (error) {
     throw new Error(`Release ${draft.id} remains a draft or needs inspection: ${error.message}`);
@@ -306,7 +335,7 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
   try {
     const published = await client.json('PATCH', `${BASE}/releases/${draft.id}`, 'Publish release', [200],
       { draft: false, prerelease: false, make_latest: 'true' });
-    if (published.id !== draft.id || published.tag_name !== TAG || published.draft !== false) {
+    if (published.id !== draft.id || published.tag_name !== tagName || published.draft !== false) {
       throw new Error('Published release response is invalid');
     }
     return result(published, plan);
@@ -314,10 +343,10 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
     let observed;
     try { observed = await client.json('GET', `${BASE}/releases/${draft.id}`, 'Recheck publication result'); }
     catch { throw new Error(`Release ${draft.id} publication outcome unknown; inspect GitHub before retrying`); }
-    if (observed.id === draft.id && observed.tag_name === TAG && observed.draft === false) {
+    if (observed.id === draft.id && observed.tag_name === tagName && observed.draft === false) {
       return result(observed, plan);
     }
-    if (observed.id === draft.id && observed.tag_name === TAG && observed.draft === true) {
+    if (observed.id === draft.id && observed.tag_name === tagName && observed.draft === true) {
       throw new Error(`Release ${draft.id} remains a draft: ${error.message}`);
     }
     throw new Error(`Release ${draft.id} publication outcome unknown; inspect GitHub before retrying`);
@@ -325,19 +354,26 @@ export async function publishRelease({ releaseDir, commit, resumeDraft }, depend
 }
 
 function cliArgs(argv) {
-  const parsed = { releaseDir: path.resolve('dist', 'update-entry-fixed-0.1.2'), publish: false, plan: false };
+  const parsed = { releaseDir: path.resolve('dist', 'kernel-upgrade-0.1.3'),
+    version: KERNEL_VERSION, publish: false, plan: false };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--plan') { parsed.plan = true; continue; }
     if (key === '--publish') { parsed.publish = true; continue; }
-    if (key === '--release-dir' || key === '--commit' || key === '--resume-draft') {
+    if (key === '--release-dir' || key === '--commit' || key === '--resume-draft'
+      || key === '--version' || key === '--bridge-dir') {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing ${key} value`);
-      parsed[key === '--commit' ? 'commit' : key === '--resume-draft' ? 'resumeDraft' : 'releaseDir'] = argv[++i];
+      parsed[key === '--commit' ? 'commit' : key === '--resume-draft' ? 'resumeDraft'
+        : key === '--bridge-dir' ? 'bridgeDir' : key === '--version' ? 'version' : 'releaseDir'] = argv[++i];
       continue;
     }
     throw new Error(`Unknown release option: ${key}`);
   }
   if (parsed.publish && parsed.plan) throw new Error('--plan and --publish are mutually exclusive');
+  if (!RELEASES[parsed.version]) throw new Error('Unsupported desktop release version');
+  if (parsed.version === BRIDGE_VERSION && parsed.releaseDir === path.resolve('dist', 'kernel-upgrade-0.1.3')) {
+    parsed.releaseDir = path.resolve('dist', 'updater-bridge-0.1.3-bridge.1');
+  }
   if (parsed.publish) validateCommit(parsed.commit);
   else if (parsed.commit) throw new Error('--commit requires --publish');
   if (parsed.resumeDraft !== undefined && !parsed.publish) throw new Error('--resume-draft requires --publish');
@@ -349,7 +385,7 @@ function cliArgs(argv) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const args = cliArgs(process.argv.slice(2));
-    const result = args.publish ? await publishRelease(args) : planRelease(args.releaseDir);
+    const result = args.publish ? await publishRelease(args) : planRelease(args.releaseDir, args);
     const display = args.publish ? result : { ...result, notes: undefined,
       files: result.files.map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 })) };
     process.stdout.write(`${JSON.stringify(display, null, 2)}\n`);

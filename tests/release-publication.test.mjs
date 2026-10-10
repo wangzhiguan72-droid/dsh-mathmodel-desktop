@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { planRelease, publishRelease } from '../scripts/publish-desktop-release.mjs';
 
 const tempRoots = [];
-const tag = 'v0.1.2';
+const tag = 'v0.1.3';
+const bridgeVersion = '0.1.3-bridge.1';
 const owner = 'wangzhiguan72-droid/dsh-mathmodel-desktop';
 const commit = 'a'.repeat(40);
 const digest = data => createHash('sha256').update(data).digest('hex');
@@ -19,11 +20,11 @@ afterEach(() => {
   for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(version = '0.1.3', bridgeDir) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-release-publication-'));
   tempRoots.push(root);
-  const zipName = 'dsh-mathmodel-desktop-0.1.2-win-x64.zip';
-  const exeName = 'dsh-mathmodel-desktop-0.1.2-win-x64.exe';
+  const zipName = `dsh-mathmodel-desktop-${version}-win-x64.zip`;
+  const exeName = `dsh-mathmodel-desktop-${version}-win-x64.exe`;
   const zip = Buffer.alloc(1_000_001, 23), exe = Buffer.alloc(1_000_003, 42);
   fs.writeFileSync(path.join(root, zipName), zip);
   fs.writeFileSync(path.join(root, exeName), exe);
@@ -33,33 +34,51 @@ function fixture() {
     artifactSha256: { [zipName]: zipHash, [exeName]: exeHash },
   }));
   fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), `${zipHash}  ${zipName}\n${exeHash}  ${exeName}\n`);
-  fs.writeFileSync(path.join(root, 'desktop-update.json'), JSON.stringify({
+  const baseVersion = version === bridgeVersion ? version : bridgeVersion;
+  const baseZipName = `dsh-mathmodel-desktop-${baseVersion}-win-x64.zip`;
+  const baseZip = version === bridgeVersion ? zip : fs.readFileSync(path.join(bridgeDir, baseZipName));
+  const manifest = {
     schema: 'dsh.desktop-update/v1', appId: 'com.deepseek.harness.mathmodel',
-    channel: 'stable', version: '0.1.2', windows: { x64: {
+    channel: 'stable', version: baseVersion, windows: { x64: {
+      url: `https://github.com/${owner}/releases/download/v${baseVersion}/${baseZipName}`,
+      sha256: digest(baseZip), bytes: baseZip.length,
+    } },
+  };
+  if (version !== bridgeVersion) manifest.upgrades = [{
+    schema: manifest.schema, appId: manifest.appId, channel: manifest.channel,
+    minVersion: bridgeVersion, version, windows: { x64: {
       url: `https://github.com/${owner}/releases/download/${tag}/${zipName}`,
       sha256: zipHash, bytes: zip.length,
     } },
-  }));
-  fs.writeFileSync(path.join(root, 'release-notes-0.1.2.txt'), 'Verified release notes.\n');
+  }];
+  fs.writeFileSync(path.join(root, 'desktop-update.json'), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(root, `release-notes-${version}.txt`), 'Verified release notes.\n');
   return root;
 }
 
-function miniPlan() {
+function kernelFixture() {
+  const bridgeDir = fixture(bridgeVersion);
+  return { root: fixture('0.1.3', bridgeDir), bridgeDir };
+}
+
+function miniPlan(version = '0.1.3') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-release-api-'));
   tempRoots.push(root);
-  const files = ['one.zip', 'two.exe', 'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.2.txt']
+  const files = ['one.zip', 'two.exe', 'desktop-update.json', 'SHA256SUMS.txt', `release-notes-${version}.txt`]
     .map((name, index) => {
       const data = Buffer.from(`asset-${index}-${name}`), filename = path.join(root, name);
       fs.writeFileSync(filename, data);
       return { name, path: filename, bytes: data.length, sha256: digest(data) };
     });
-  return { notes: 'Verified release notes.', files };
+  return { notes: 'Verified release notes.', files, repository: owner,
+    version, tag: `v${version}`, releaseUrl: `https://github.com/${owner}/releases/tag/v${version}` };
 }
 
 function api(plan, { tagSha = commit, uploadStatus = 201, digestMissing = false,
   sizeMismatch = false, tagChanges = false, existingDraft = false,
   initialAssets = [], patchResponseLost = false, recheckFails = false,
   createResponseLost = false, apiHangs = false } = {}) {
+  const tag = plan.tag;
   const calls = [];
   const uploaded = new Set(initialAssets);
   let tagReads = 0, created = existingDraft, published = false;
@@ -123,27 +142,67 @@ function api(plan, { tagSha = commit, uploadStatus = 201, digestMissing = false,
 }
 
 test('offline plan validates five local assets without requesting credentials', () => {
-  const root = fixture();
-  const plan = planRelease(root);
+  const { root, bridgeDir } = kernelFixture();
+  const plan = planRelease(root, { bridgeDir });
   assert.deepEqual(plan.files.map(file => file.name), [
-    'dsh-mathmodel-desktop-0.1.2-win-x64.zip',
-    'dsh-mathmodel-desktop-0.1.2-win-x64.exe',
-    'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.2.txt',
+    'dsh-mathmodel-desktop-0.1.3-win-x64.zip',
+    'dsh-mathmodel-desktop-0.1.3-win-x64.exe',
+    'desktop-update.json', 'SHA256SUMS.txt', 'release-notes-0.1.3.txt',
   ]);
   const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/publish-desktop-release.mjs');
-  const output = JSON.parse(execFileSync(process.execPath, [script, '--release-dir', root, '--plan'],
+  const output = JSON.parse(execFileSync(process.execPath, [script, '--release-dir', root, '--bridge-dir', bridgeDir, '--plan'],
     { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }));
   assert.equal(output.files.length, 5);
   assert.equal(output.files[0].sha256, digest(fs.readFileSync(path.join(root, output.files[0].name))));
 });
 
 test('manifest with wrong release URL is rejected locally', () => {
-  const root = fixture();
+  const { root, bridgeDir } = kernelFixture();
   const filename = path.join(root, 'desktop-update.json');
   const manifest = JSON.parse(fs.readFileSync(filename));
   manifest.windows.x64.url = 'https://example.com/other.zip';
   fs.writeFileSync(filename, JSON.stringify(manifest));
-  assert.throws(() => planRelease(root), /manifest does not match/);
+  assert.throws(() => planRelease(root, { bridgeDir }), /manifest does not match/);
+});
+
+test('bridge plan permits its standalone feed and kernel plan requires the verified bridge', () => {
+  const bridgeDir = fixture(bridgeVersion);
+  const bridgePlan = planRelease(bridgeDir, { version: bridgeVersion });
+  assert.equal(bridgePlan.tag, `v${bridgeVersion}`);
+  assert.equal(bridgePlan.files.length, 5);
+  const root = fixture('0.1.3', bridgeDir);
+  assert.throws(() => planRelease(root), /requires --bridge-dir/);
+  assert.equal(planRelease(root, { bridgeDir }).version, '0.1.3');
+  const manifestPath = path.join(root, 'desktop-update.json');
+  const original = fs.readFileSync(manifestPath, 'utf8');
+  for (const change of [
+    feed => { feed.upgrades[0].minVersion = '0.1.2'; },
+    feed => { feed.upgrades[0].windows.x64.sha256 = '0'.repeat(64); },
+    feed => { feed.windows.x64.sha256 = '0'.repeat(64); },
+    feed => { feed.upgrades[0].channel = 'next'; },
+    feed => { feed.upgrades.push(feed.upgrades[0]); },
+  ]) {
+    const feed = JSON.parse(original);
+    change(feed);
+    fs.writeFileSync(manifestPath, JSON.stringify(feed));
+    assert.throws(() => planRelease(root, { bridgeDir }));
+  }
+  fs.writeFileSync(manifestPath, original);
+  assert.throws(() => planRelease(root, { version: '0.1.4', bridgeDir }), /Unsupported/);
+});
+
+test('bridge publication uses its fixed tag and refuses a mismatched plan before credentials', async () => {
+  const plan = miniPlan(bridgeVersion), mock = api(plan);
+  const result = await publishRelease({ releaseDir: '.', commit, version: bridgeVersion }, {
+    plan: () => plan, credential: async () => 'unit-test-token', fetch: mock.fetch,
+  });
+  assert.equal(result.state, 'published');
+  assert.ok(mock.calls.some(call => call.url.includes(`/git/ref/tags/v${bridgeVersion}`)));
+  let credentialCalled = false;
+  await assert.rejects(publishRelease({ releaseDir: '.', commit, version: bridgeVersion }, {
+    plan: () => ({ ...plan, tag: 'v0.1.4' }), credential: async () => { credentialCalled = true; return 'x'; },
+  }), /identity is invalid/);
+  assert.equal(credentialCalled, false);
 });
 
 test('remote annotated tag mismatch stops before any release POST', async () => {

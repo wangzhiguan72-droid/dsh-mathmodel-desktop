@@ -201,6 +201,30 @@ function stage(part) {
   console.log('[build-runtime] staged ' + part + ' -> ' + path.relative(desktopDir, dest));
 }
 
+// pnpm may reuse a cached file: package when its version is unchanged. Always
+// stage the freshly built local plugin instead of that cached dependency.
+export function stageLocalPlugin(profileDir, pluginDir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf8'));
+  if (manifest.name !== '@deepseek-harness/dsh-mathmodel' || manifest.main !== 'lib/index.js') {
+    throw new Error('Unexpected local plugin identity');
+  }
+  const lib = path.join(pluginDir, 'lib');
+  if (!fs.lstatSync(lib).isDirectory() || fs.lstatSync(lib).isSymbolicLink()) throw new Error('Unsafe plugin build directory');
+  assertNoSymlinks(lib);
+  if (!fs.statSync(path.join(lib, 'index.js')).isFile()) throw new Error('Local plugin has not been built');
+  const target = path.join(profileDir, 'node_modules', '@deepseek-harness', 'dsh-mathmodel');
+  const scope = path.dirname(target);
+  if (!fs.lstatSync(scope).isDirectory() || fs.lstatSync(scope).isSymbolicLink()) throw new Error('Unsafe plugin package scope');
+  if (fs.existsSync(target)) {
+    if (!fs.lstatSync(target).isDirectory() || fs.lstatSync(target).isSymbolicLink()) throw new Error('Unsafe staged plugin');
+    if (path.dirname(path.resolve(target)) !== path.resolve(scope)) throw new Error('Plugin target escaped staging scope');
+    fs.rmSync(target, { recursive: true });
+  }
+  fs.mkdirSync(target);
+  fs.copyFileSync(path.join(pluginDir, 'package.json'), path.join(target, 'package.json'));
+  fs.cpSync(lib, path.join(target, 'lib'), { recursive: true });
+}
+
 /**
  * Align the profile's top-level @deepseek-ai framework copies with the host
  * closure: dsh-web-all's dependency dsh-better-sidebar@0.18.0 pins the whole
@@ -325,6 +349,10 @@ async function main() {
   const hostVersion = readPinnedVersion('host', '@deepseek-ai/dsh');
   const webAllVersion = readPinnedVersion('profile-web', '@linxin666/dsh-web-all');
 
+  const pluginDir = path.join(desktopDir, 'plugins', 'dsh-mathmodel');
+  const pluginBuild = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'build.mjs')],
+    { cwd: pluginDir, stdio: 'inherit', windowsHide: true });
+  if (pluginBuild.status !== 0) throw new Error('Local plugin build failed');
   pnpmInstall('host');
   pnpmInstall('profile-web');
   hoistPnpmFallbacks('host');
@@ -332,6 +360,7 @@ async function main() {
   reconcileProfileCohort('profile-web');
   stage('host');
   stage('profile-web');
+  stageLocalPlugin(path.join(stagingRoot, 'profile-web'), pluginDir);
   await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));
   await patchDesktopUpdateProfile(path.join(stagingRoot, 'profile-web'));
   await stageCloudflaredWindowsBinary();

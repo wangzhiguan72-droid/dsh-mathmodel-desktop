@@ -10,7 +10,8 @@ const require = createRequire(import.meta.url);
 const { extractFile, uncache } = require('@electron/asar');
 const updates = require('../src/desktop-updates.cjs');
 const worker = require('../src/update-worker.cjs');
-const VERSION = '0.1.2';
+const snapshotModule = require('../src/update-data-snapshot.cjs');
+const VERSION = '0.1.3';
 const PACKAGE = 'dsh-mathmodel-desktop';
 const executablePattern = /^Uninstall .+\.exe$/i;
 
@@ -21,13 +22,14 @@ function hashFile(filename) {
   return hash.digest('hex');
 }
 
-export function releaseFiles(releaseDir) {
+export function releaseFiles(releaseDir, version = VERSION) {
   const verify = JSON.parse(fs.readFileSync(path.join(releaseDir, 'verification.json'), 'utf8'));
   if (verify.ok !== true || verify.unpackedFiles < 10000 || verify.zipAllFiles !== verify.unpackedFiles) {
     throw new Error('Release verification receipt is incomplete');
   }
   const checksums = fs.readFileSync(path.join(releaseDir, 'SHA256SUMS.txt'), 'utf8');
-  const expectedNames = [`dsh-mathmodel-desktop-${VERSION}-win-x64.zip`, `dsh-mathmodel-desktop-${VERSION}-win-x64.exe`];
+  if (!['0.1.3-bridge.1', VERSION].includes(version)) throw new Error('Unsupported desktop release version');
+  const expectedNames = [`dsh-mathmodel-desktop-${version}-win-x64.zip`, `dsh-mathmodel-desktop-${version}-win-x64.exe`];
   const artifacts = expectedNames.map(name => {
     const entry = path.join(releaseDir, name), stat = fs.lstatSync(entry);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1000000) throw new Error('Release artifact is not an ordinary file');
@@ -51,6 +53,19 @@ function installedIdentity(installDir) {
     throw new Error('This bootstrap accepts the installed desktop 0.1.0 only');
   }
   return { executableName: name, metadata };
+}
+
+function bundledSessionFormat(root) {
+  const filename = path.join(root, 'resources', 'runtime', 'host', 'node_modules',
+    '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
+  if (!fs.existsSync(filename)) return null;
+  const stat = fs.lstatSync(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe session format source');
+  const matches = [...fs.readFileSync(filename, 'utf8').matchAll(/\bconst SESSION_FORMAT_VERSION\s*=\s*(\d+)\s*;/g)];
+  if (matches.length !== 1) throw new Error('Cannot identify bundled session format');
+  const format = Number(matches[0][1]);
+  if (!Number.isSafeInteger(format) || format < 1) throw new Error('Invalid bundled session format');
+  return format;
 }
 
 function activeProcessRows(installDir) {
@@ -154,6 +169,8 @@ export async function runBootstrap(args, dependencies = {}) {
     uninstaller = extractSafeUninstaller(release.nsis.entry, stage);
     updates.validateCandidate(stage, { executableName: identity.executableName, packageName: PACKAGE, version: VERSION });
   }
+  const formatFrom = bundledSessionFormat(installDir), formatTo = bundledSessionFormat(stage);
+  if ((formatFrom === null) !== (formatTo === null)) throw new Error('Session format unavailable in one release');
   const candidateSha256 = await worker.treeDigestAsync(stage);
   const stateDir = path.join(userData, 'desktop-updates');
   if (fs.existsSync(stateDir)) {
@@ -162,14 +179,16 @@ export async function runBootstrap(args, dependencies = {}) {
   }
   fs.mkdirSync(stateDir, { recursive: true });
   const jobPath = path.join(stateDir, `${nonce}.job.json`);
+  const snapshot = snapshotData({ home, userData, backupRoot, nonce });
   const job = { schema: 'dsh.desktop-update-job/v1', nonce, kind: 'update', state: 'prepared',
     bootstrap: true,
     appId: updates.APP_ID, fromVersion: identity.metadata.version, toVersion: VERSION,
     executableName: identity.executableName, packageName: PACKAGE, installDir, previousDir: previous,
-    candidateDir: stage, extractionDir: stage, userDataDir: userData, archiveSha256: release.zip.sha256,
+    candidateDir: stage, extractionDir: stage, userDataDir: userData, homeDir: home,
+    sessionFormatFrom: formatFrom, sessionFormatTo: formatTo, dataSnapshot: snapshot,
+    archiveSha256: release.zip.sha256,
     candidateSha256, createdAt: new Date().toISOString(), jobPath,
     bootMarker: `${jobPath}.boot-ok`, workerReady: `${jobPath}.worker-ready` };
-  const snapshot = snapshotData({ home, userData, backupRoot, nonce });
   fs.writeFileSync(jobPath, JSON.stringify(job), { flag: 'wx', mode: 0o600 });
   const activeBeforeSwap = dependencies.activeProcesses?.(installDir) ?? activeProcessRows(installDir);
   if (activeBeforeSwap.length) {
@@ -178,13 +197,16 @@ export async function runBootstrap(args, dependencies = {}) {
   const launcher = dependencies.launchApp || ((file, argv, options) => spawn(file, argv, options));
   let restoreResult;
   const launchApp = (file, argv, options) => {
-    if (options.env.DSH_DESKTOP_UPDATE_RECOVERED === nonce) restoreResult = restoreData(snapshot);
     return launcher(file, argv, { ...options, env: { ...options.env,
       DSH_HOME: home, DSH_DESKTOP_USER_DATA: userData,
       ...(args['headless-verify'] ? { DSH_DESKTOP_VERIFY: '1', DSH_DESKTOP_HEADLESS: '1' } : {}) } });
   };
   const outcome = await worker.transact(job, process.pid, 'bootstrap-cli', Promise.resolve(),
     { launchApp, bootTimeoutMs: dependencies.bootTimeoutMs || 1200000,
+      dataModule: { ...snapshotModule,
+        snapshotData: () => { assertSnapshotCurrent(snapshot); return snapshot; },
+        restoreData: record => { restoreResult = restoreData(record); return restoreResult; },
+      },
       beforeSwap: () => {
         assertSnapshotCurrent(snapshot);
         const running = dependencies.activeProcesses?.(installDir) ?? activeProcessRows(installDir);

@@ -9,8 +9,8 @@ import { patchDesktopClientSource, patchDesktopServerSource, patchDesktopUpdateP
 const root = path.resolve(import.meta.dirname, '..')
 const scope = '@linxin666'
 const runtime = path.join(root, 'runtime/profile-web/node_modules', scope)
-const bundle = path.join(root, 'resources/runtime/profile-web/node_modules', scope, 'dsh-web-all/lib/client.js')
-const clientNames = ['dsh-web-all', 'dsh-remote-web-ui']
+const bundle = path.join(runtime, 'dsh-update/lib/client.js')
+const clientNames = ['dsh-web-all', 'dsh-update']
 
 function region(source, start, end) {
   const first = source.indexOf(start)
@@ -40,7 +40,8 @@ function renderClient(source, desktopUpdates) {
     react, window: desktopUpdates === undefined ? {} : { desktopUpdates },
     react_jsx_runtime: { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'fragment' },
     remote_module_css_default: { trigger: 'trigger', updateBadgeText: 'text' },
-    _deepseek_ai_dsh_client_ui_primitives: { IconDownloadOutline16: 'icon' },
+    update_module_css_default: { trigger: 'trigger', updateBadgeText: 'text' },
+    _deepseek_ai_dsh_client_ui_primitives: { IconDownloadOutline16: 'icon', IconDownloadOutlineRegular: 'icon' },
     react_dom: { createPortal() { throw Error('legacy modal unexpectedly opened') } },
     fetchUpdateStatus: async () => { calls.push('legacy-fetch'); return { mode: 'npm', outdated: true } },
     setTimeout, console,
@@ -57,9 +58,9 @@ function renderClient(source, desktopUpdates) {
   }
 }
 
-test('both real pinned vendor clients use the desktop bridge and never probe pnpm in desktop mode', async () => {
+test('both rc2 aggregate and standalone update plugins use the desktop bridge without pnpm probes', async () => {
   for (const name of clientNames) {
-    const file = name === 'dsh-web-all' ? bundle : path.join(runtime, name, 'lib/client.js')
+    const file = path.join(runtime, name, 'lib/client.js')
     const original = await readFile(file, 'utf8')
     const patched = patchDesktopClientSource(original)
     assert.equal(patchDesktopClientSource(patched), patched)
@@ -105,7 +106,7 @@ test('regular browser keeps the vendor update implementation and availability pr
 })
 
 test('server desktop fence blocks legacy check/run but retains method and request fence', async () => {
-  const original = await readFile(path.join(runtime, 'dsh-remote-web-ui/lib/index.js'), 'utf8')
+  const original = await readFile(path.join(runtime, 'dsh-update/lib/index.js'), 'utf8')
   const patched = patchDesktopServerSource(original)
   assert.equal(patchDesktopServerSource(patched), patched)
   const code = region(patched, 'function makeUpdateRoutes(deps) {', '//#endregion')
@@ -167,5 +168,35 @@ test('profile validation is atomic across both clients and server; successful pa
     assert.equal((await patchDesktopUpdateProfile(temp)).changed, true)
     assert.equal((await patchDesktopUpdateProfile(temp)).changed, false)
     assert.match(await readFile(path.join(remoteDir, 'lib/index.js'), 'utf8'), /desktop-managed/)
+  } finally { await rm(temp, { recursive: true, force: true }) }
+})
+
+test('rc2 family validates both update clients and server before changing any file', async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'desktop-update-rc2-'))
+  try {
+    const webDir = path.join(temp, 'node_modules', scope, 'dsh-web-all')
+    const updateDir = path.join(temp, 'node_modules', scope, 'dsh-update')
+    await mkdir(path.join(webDir, 'lib'), { recursive: true })
+    await mkdir(path.join(updateDir, 'lib'), { recursive: true })
+    await writeFile(path.join(webDir, 'package.json'), JSON.stringify({ name: `${scope}/dsh-web-all`, version: '0.4.5' }))
+    await writeFile(path.join(updateDir, 'package.json'), JSON.stringify({ name: `${scope}/dsh-update`, version: '0.4.6' }))
+    const client = await readFile(bundle, 'utf8')
+    const aggregate = await readFile(path.join(runtime, 'dsh-web-all/lib/client.js'), 'utf8')
+    await writeFile(path.join(webDir, 'lib/client.js'), aggregate)
+    await writeFile(path.join(updateDir, 'lib/client.js'), client)
+    await writeFile(path.join(updateDir, 'lib/index.js'), 'missing anchors')
+    await assert.rejects(patchDesktopUpdateProfile(temp), /Unsupported desktop update package/)
+    await writeFile(path.join(updateDir, 'package.json'), JSON.stringify({ name: `${scope}/dsh-update`, version: '0.4.5' }))
+    await assert.rejects(patchDesktopUpdateProfile(temp), /anchor missing/)
+    assert.equal(await readFile(path.join(updateDir, 'lib/client.js'), 'utf8'), client)
+    assert.equal(await readFile(path.join(webDir, 'lib/client.js'), 'utf8'), aggregate)
+    await writeFile(path.join(updateDir, 'lib/index.js'), await readFile(path.join(runtime, 'dsh-update/lib/index.js'), 'utf8'))
+    const result = await patchDesktopUpdateProfile(temp)
+    assert.equal(result.files.length, 3)
+    assert.equal(result.changed, true)
+    assert.equal((await patchDesktopUpdateProfile(temp)).changed, false)
+    assert.match(await readFile(path.join(updateDir, 'lib/client.js'), 'utf8'), /IconDownloadOutlineRegular/)
+    assert.match(await readFile(path.join(webDir, 'lib/client.js'), 'utf8'), /data-desktop-update-entry/)
+    assert.match(await readFile(path.join(updateDir, 'lib/index.js'), 'utf8'), /desktop-managed/)
   } finally { await rm(temp, { recursive: true, force: true }) }
 })

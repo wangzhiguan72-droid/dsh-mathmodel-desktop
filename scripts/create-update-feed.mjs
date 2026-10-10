@@ -4,11 +4,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { compareVersions } = require('../src/desktop-updates.cjs');
 
 const schema = 'dsh.desktop-update/v1';
 const appId = 'com.deepseek.harness.mathmodel';
-const flags = new Set(['--zip', '--version', '--url', '--notes-file', '--out']);
+const upgradeFlags = ['--upgrade-zip', '--upgrade-version', '--upgrade-url', '--upgrade-min-version'];
+const flags = new Set(['--zip', '--version', '--url', '--notes-file', '--out', ...upgradeFlags, '--upgrade-notes-file']);
 
 function parseArgs(argv) {
   const options = {};
@@ -22,6 +27,10 @@ function parseArgs(argv) {
   for (const flag of ['--zip', '--version', '--url', '--out']) {
     if (!options[flag]) throw new Error(`Missing required argument: ${flag}`);
   }
+  if (upgradeFlags.some(flag => options[flag]) && upgradeFlags.some(flag => !options[flag])) {
+    throw new Error('Upgrade ZIP, version, URL and minimum version must be supplied together');
+  }
+  if (options['--upgrade-notes-file'] && !options['--upgrade-zip']) throw new Error('Upgrade notes require an upgrade');
   return options;
 }
 
@@ -100,6 +109,23 @@ export async function createUpdateFeed(argv) {
     schema, appId, channel: 'stable', version: options['--version'], notes,
     windows: { x64: { url, sha256, bytes } },
   };
+  if (options['--upgrade-zip']) {
+    const upgradeVersion = options['--upgrade-version'];
+    const minVersion = options['--upgrade-min-version'];
+    validVersion(upgradeVersion);
+    validVersion(minVersion);
+    if (compareVersions(minVersion, feed.version) < 0 || compareVersions(upgradeVersion, minVersion) <= 0) {
+      throw new Error('Upgrade version order is invalid');
+    }
+    const upgradeUrl = validUrl(options['--upgrade-url']);
+    const upgradeZip = path.resolve(options['--upgrade-zip']);
+    if (upgradeZip === zipPath || upgradeZip === outPath) throw new Error('Upgrade ZIP must be a separate artifact');
+    const upgradeNotes = options['--upgrade-notes-file'] ? await fs.readFile(options['--upgrade-notes-file'], 'utf8') : '';
+    if (Buffer.byteLength(upgradeNotes) > 16 * 1024) throw new Error('Upgrade notes exceed 16 KiB');
+    const upgradeAsset = await inspectZip(upgradeZip);
+    feed.upgrades = [{ schema, appId, channel: 'stable', minVersion, version: upgradeVersion,
+      notes: upgradeNotes, windows: { x64: { url: upgradeUrl, ...upgradeAsset } } }];
+  }
   // Create beside the destination, then replace it only after every input validates.
   const temporary = `${outPath}.${randomUUID()}.tmp`;
   try {

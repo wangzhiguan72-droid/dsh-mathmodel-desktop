@@ -24,6 +24,38 @@ const DESKTOP_PORT_SPAN = 100;
 /** Marker file written into a profile directory this app seeded itself. */
 const SEED_MARKER = '.dsh-desktop-seed.json';
 
+/** Active 0.4.5 shell rows; direct external inserts and disabled opt-ins are absent from /rows. */
+const EXPECTED_WEB_FAMILY_ROWS = Object.freeze([
+  'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
+  'dsh-client-ui-market',
+  'dsh-client-ui-task-board', 'dsh-client-ui-task-board-github',
+  'dsh-client-ui-git-graph', 'dsh-remote-web-ui', 'dsh-update',
+  'dsh-usage', 'dsh-session-archive', 'dsh-client-ui-model-capabilities',
+].map((name) => '@linxin666/' + name));
+const OPTIONAL_WEB_FAMILY_ROWS = new Set([
+  '@linxin666/dsh-ssh', '@linxin666/dsh-liangshen',
+  '@linxin666/dsh-client-ui-skill-explorer',
+]);
+
+const LEGACY_WEB_FAMILY_ROWS = Object.freeze([
+  'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
+  'dsh-client-ui-community-plugins', 'dsh-client-ui-market',
+  'dsh-client-ui-task-board', 'dsh-client-ui-git-graph', 'dsh-remote-web-ui',
+  'dsh-pet', 'dsh-usage', 'dsh-session-archive',
+  'dsh-client-ui-model-capabilities', 'dsh-client-ui-preset-center', 'dsh-client-ui-skin-center',
+].map(name => '@linxin666/' + name));
+
+function hasCompleteWebFamily(rows, version = '0.4.5') {
+  const children = rows?.children;
+  if (!Array.isArray(children) || new Set(children).size !== children.length) return false;
+  const names = version === '0.4.5' ? EXPECTED_WEB_FAMILY_ROWS
+    : version === '0.3.23' ? LEGACY_WEB_FAMILY_ROWS : null;
+  if (!names) return false;
+  const required = new Set(names);
+  return names.every((name) => children.includes(name)) &&
+    children.every((name) => required.has(name) || version === '0.4.5' && OPTIONAL_WEB_FAMILY_ROWS.has(name));
+}
+
 /**
  * argv fragments that mark a second launch as a programmatic spawn of this
  * executable (doctor supervisor/provisioning children, CLI helpers) rather
@@ -587,6 +619,8 @@ module.exports = {
   DESKTOP_PORT_BASE,
   DESKTOP_PORT_SPAN,
   SEED_MARKER,
+  EXPECTED_WEB_FAMILY_ROWS,
+  hasCompleteWebFamily,
   RUNTIME_STAMP,
   resolveRuntimePaths,
   resolveDshHome,

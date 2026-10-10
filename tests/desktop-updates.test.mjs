@@ -6,7 +6,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { compareVersions, validateRelease, checkForUpdate, prepareUpdate, inspectZip, verifyExtractedZip } = require('../src/desktop-updates.cjs');
+const { compareVersions, validateRelease, checkForUpdate, prepareUpdate, inspectZip,
+  verifyExtractedZip, launchUpdate } = require('../src/desktop-updates.cjs');
 
 function release(url, sha256 = 'a'.repeat(64)) {
   return { schema: 'dsh.desktop-update/v1', appId: 'com.deepseek.harness.mathmodel', channel: 'stable',
@@ -34,6 +35,41 @@ test('foreign feeds and unsafe download URLs are refused', () => {
   assert.throws(() => validateRelease({ ...release('https://example.test/app.zip'), appId: 'foreign-app' }));
   assert.throws(() => validateRelease(release('http://example.test/app.zip')));
   assert.throws(() => validateRelease(release('https://user:password@example.test/app.zip')));
+});
+
+test('old clients receive the bridge while bridge clients receive the kernel', async t => {
+  const base = release('https://example.test/bridge.zip');
+  base.version = '0.1.3-bridge.1';
+  base.upgrades = [{ ...release('https://example.test/kernel.zip', 'b'.repeat(64)),
+    minVersion: '0.1.3-bridge.1', version: '0.1.3' }];
+  // The 0.1.2 validator is unchanged and drops fields it cannot understand.
+  assert.equal(validateRelease(base).version, '0.1.3-bridge.1');
+  assert.equal(validateRelease(base).upgrades, undefined);
+  const server = http.createServer((_request, response) => response.end(JSON.stringify(base)));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const feedUrl = `http://127.0.0.1:${server.address().port}/feed`;
+  const check = version => checkForUpdate({ feedUrl, currentVersion: version, allowLoopbackHttp: true });
+  assert.equal((await check('0.1.2')).release.windows.x64.url, base.windows.x64.url);
+  assert.equal((await check('0.1.2')).release.version, '0.1.3-bridge.1');
+  assert.equal((await check('0.1.3-bridge.1')).release.version, '0.1.3');
+  assert.equal((await check('0.1.3')).available, false);
+  for (const malformed of [
+    { ...base, upgrades: [{}] },
+    { ...base, upgrades: [] },
+    { ...base, upgrades: Array(5).fill(base.upgrades[0]) },
+    { ...base, upgrades: [{ ...base.upgrades[0], minVersion: '0.1.2' }] },
+    { ...base, upgrades: [{ ...base.upgrades[0], minVersion: '0.1.3' }] },
+    { ...base, upgrades: [{ ...base.upgrades[0], appId: 'foreign-app' }] },
+    { ...base, upgrades: [{ ...base.upgrades[0], channel: 'next' }] },
+    { ...base, upgrades: [{ ...base.upgrades[0], windows: { x64: { ...base.upgrades[0].windows.x64,
+      url: 'http://example.test/kernel.zip' } } }] },
+  ]) {
+    base.upgrades = malformed.upgrades;
+    await assert.rejects(check('0.1.3-bridge.1'));
+    base.upgrades = [{ ...release('https://example.test/kernel.zip', 'b'.repeat(64)),
+      minVersion: '0.1.3-bridge.1', version: '0.1.3' }];
+  }
 });
 
 test('ZIP inspection rejects traversal, Windows aliases and links before extraction', t => {
@@ -82,6 +118,39 @@ test('an absent update feed preserves its HTTP status for the update UI', async 
   });
   await assert.rejects(checkForUpdate({ feedUrl: `http://127.0.0.1:${server.address().port}/feed`,
     currentVersion: '0.1.1', allowLoopbackHttp: true }), error => error.statusCode === 404);
+});
+
+test('cross-format worker directory can be created and reused but rejects a junction', async t => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-worker-directory-')));
+  const profile = path.join(root, 'profile'), homeDir = path.join(root, 'home');
+  const userDataDir = path.join(root, 'data'), target = path.join(root, 'target');
+  for (const directory of [profile, homeDir, userDataDir, target]) fs.mkdirSync(directory);
+  const jobPath = path.join(userDataDir, 'prepared.json');
+  fs.writeFileSync(jobPath, '{}');
+  const job = { state: 'prepared', jobPath, homeDir, userDataDir,
+    sessionFormatFrom: 3, sessionFormatTo: 4, nonce: 'missing/child' };
+  const originalHome = os.homedir;
+  os.homedir = () => profile;
+  const workerDir = path.join(profile, '.dsh-desktop-update-workers');
+  t.after(() => {
+    os.homedir = originalHome;
+    assert.equal(path.dirname(root).toLowerCase(), fs.realpathSync.native(os.tmpdir()).toLowerCase());
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  // The missing nonce subdirectory makes the source copy fail before spawning
+  // a helper, after launchUpdate has executed its real directory path.
+  const launch = () => launchUpdate(job, { nodeBin: process.execPath });
+  await assert.rejects(launch(), { code: 'ENOENT' });
+  assert.equal(fs.lstatSync(workerDir).isDirectory(), true);
+  const sentinel = path.join(workerDir, 'sentinel.txt');
+  fs.writeFileSync(sentinel, 'keep');
+  await assert.rejects(launch(), { code: 'ENOENT' });
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
+  fs.rmSync(sentinel);
+  fs.rmdirSync(workerDir);
+  fs.symlinkSync(target, workerDir, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(launch(), /Unsafe data directory/);
+  assert.deepEqual(fs.readdirSync(target), []);
 });
 
 test('missing, truncated and extra extracted files reject the whole release', t => {

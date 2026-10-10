@@ -15,6 +15,8 @@ const dist = path.join(repo, 'dist');
 const output = path.resolve(process.argv[2] ?? path.join(dist, 'rc3-verified'));
 const sevenZip = path.join(repo, 'node_modules', 'electron-winstaller', 'vendor', '7z.exe');
 const desktop = JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8'));
+const bridge = process.argv.includes('--bridge');
+if (bridge) desktop.version = '0.1.3-bridge.1';
 const base = `dsh-mathmodel-desktop-${desktop.version}-win-x64`;
 const productExe = 'DeepSeek 数学建模版.exe';
 const required = [
@@ -33,6 +35,8 @@ const required = [
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/index.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-update/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-update/lib/index.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/package.json',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/lib/index.js',
@@ -49,10 +53,19 @@ const compareFromZip = [
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/client.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-remote-web-ui/lib/index.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-update/lib/client.js',
+  'resources/runtime/profile-web/node_modules/@linxin666/dsh-update/lib/index.js',
   'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/cordis.patch.yml',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/package.json',
   'resources/runtime/profile-web/node_modules/@deepseek-harness/dsh-mathmodel/lib/index.js',
 ];
+if (bridge) {
+  for (const entries of [required, compareFromZip]) {
+    for (let index = entries.length - 1; index >= 0; index--) {
+      if (entries[index].includes('/@linxin666/dsh-update/')) entries.splice(index, 1);
+    }
+  }
+}
 
 function within(parent, candidate) {
   const rel = path.relative(parent, candidate);
@@ -180,7 +193,7 @@ async function main() {
     'app.asar runtime does not match the checked-out source');
   const packedPackage = JSON.parse(extractFile(appAsar, 'package.json').toString('utf8'));
   assert.equal(packedPackage.version, desktop.version, 'app.asar desktop version differs');
-  for (const name of ['preload.cjs', 'desktop-updates.cjs', 'update-worker.cjs',
+  for (const name of ['preload.cjs', 'desktop-updates.cjs', 'update-worker.cjs', 'update-data-snapshot.cjs', 'update-boot-safety.cjs',
     'stage-validator.cjs', 'update-controller.cjs', 'update-settings-preload.cjs',
     'update-settings.html', 'update-channel.json']) {
     assert.equal(sha256(extractFile(appAsar, 'src/' + name)), await hashFile(path.join(repo, 'src', name)),
@@ -197,9 +210,9 @@ async function main() {
   const version = JSON.parse(fs.readFileSync(file(unpacked, 'resources/runtime/VERSION.json'), 'utf8'));
   const hostPackage = JSON.parse(fs.readFileSync(file(unpacked,
     'resources/runtime/host/node_modules/@deepseek-ai/dsh/package.json'), 'utf8'));
-  assert.equal(version.host, '@deepseek-ai/dsh@0.1.5-rc.3');
-  assert.equal(hostPackage.version, '0.1.5-rc.3');
-  assert.equal(version.webAll, '@linxin666/dsh-web-all@0.3.23');
+  assert.equal(version.host, bridge ? '@deepseek-ai/dsh@0.1.5-rc.3' : '@deepseek-ai/dsh@0.2.0-rc.2');
+  assert.equal(hostPackage.version, bridge ? '0.1.5-rc.3' : '0.2.0-rc.2');
+  assert.equal(version.webAll, bridge ? '@linxin666/dsh-web-all@0.3.23' : '@linxin666/dsh-web-all@0.4.5');
 
   const zipListing = listingOf(zip);
   assert.match(zipListing.header, /^Type = zip\r?$/m, '7z does not recognize the ZIP archive');

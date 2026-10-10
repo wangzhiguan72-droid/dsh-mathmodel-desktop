@@ -1,8 +1,8 @@
 {
   "name": "dsh-mathmodel-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3-bridge.1",
   "private": true,
-  "description": "DeepSeek 数学建模版桌面端：Electron 壳内置独立 Node 运行时、dsh 宿主（0.1.5-rc.3）与预装数学建模 profile（dsh-web 插件全家桶 + dsh-mathmodel），开箱即用。",
+  "description": "DeepSeek 数学建模版：安装受保护的更新器，内核保持 0.1.5-rc.3。",
   "main": "src/main.cjs",
   "author": "DeepSeek Harness Contributors",
   "license": "Apache-2.0",

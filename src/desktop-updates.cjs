@@ -20,6 +20,26 @@ const SCHEMA = 'dsh.desktop-update/v1';
 const MAX_FEED_BYTES = 128 * 1024;
 const MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024;
 
+function sessionFormat(root) {
+  const filename = path.join(root, 'resources', 'runtime', 'host', 'node_modules',
+    '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
+  if (!fs.existsSync(filename)) return null;
+  const stat = fs.lstatSync(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe session format source');
+  const source = fs.readFileSync(filename, 'utf8');
+  const matches = [...source.matchAll(/\bconst SESSION_FORMAT_VERSION\s*=\s*(\d+)\s*;/g)];
+  if (matches.length !== 1) throw new Error('Cannot identify bundled session format');
+  const format = Number(matches[0][1]);
+  if (!Number.isSafeInteger(format) || format < 1) throw new Error('Invalid bundled session format');
+  return format;
+}
+
+function sessionFormatChange(current, candidate) {
+  const from = sessionFormat(current), to = sessionFormat(candidate);
+  if ((from === null) !== (to === null)) throw new Error('Session format unavailable in one release');
+  return { from, to, changed: from !== to };
+}
+
 function versionParts(value) {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
   if (!match || match[4]?.split('.').some(part => /^0\d+$/.test(part))) throw new Error('Invalid desktop release version');
@@ -162,10 +182,43 @@ function validateRelease(feed, { appId = APP_ID, allowLoopbackHttp = false } = {
     windows: { x64: { url: asset.url, sha256: asset.sha256.toLowerCase(), bytes: asset.bytes } } };
 }
 
+function validateUpdateFeed(feed, options) {
+  const base = validateRelease(feed, options);
+  if (feed.upgrades === undefined) return { base, upgrades: [] };
+  if (!Array.isArray(feed.upgrades) || feed.upgrades.length < 1 || feed.upgrades.length > 4) {
+    throw new Error('Update upgrade list is invalid');
+  }
+  let previousMinimum = base.version;
+  let previousTarget = base.version;
+  const upgrades = feed.upgrades.map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || entry.upgrades !== undefined) {
+      throw new Error('Update upgrade entry is invalid');
+    }
+    const allowed = new Set(['schema', 'appId', 'channel', 'minVersion', 'version', 'notes', 'windows']);
+    if (Object.keys(entry).some(key => !allowed.has(key))) throw new Error('Update upgrade entry has unknown fields');
+    versionParts(entry.minVersion);
+    const release = validateRelease(entry, options);
+    if (compareVersions(entry.minVersion, previousMinimum) < 0
+      || compareVersions(release.version, entry.minVersion) <= 0
+      || compareVersions(release.version, previousTarget) <= 0) {
+      throw new Error('Update upgrade version order is invalid');
+    }
+    previousMinimum = entry.minVersion;
+    previousTarget = release.version;
+    return { minVersion: entry.minVersion, release };
+  });
+  return { base, upgrades };
+}
+
 async function checkForUpdate({ feedUrl, currentVersion, appId = APP_ID, allowLoopbackHttp = false }) {
   if (!feedUrl) return { available: false, reason: 'feed-not-configured' };
   versionParts(currentVersion);
-  const release = validateRelease(await fetchSmallJson(feedUrl, allowLoopbackHttp), { appId, allowLoopbackHttp });
+  const feed = validateUpdateFeed(await fetchSmallJson(feedUrl, allowLoopbackHttp), { appId, allowLoopbackHttp });
+  let release = feed.base;
+  for (const upgrade of feed.upgrades) {
+    if (compareVersions(currentVersion, upgrade.minVersion) >= 0
+      && compareVersions(upgrade.release.version, release.version) > 0) release = upgrade.release;
+  }
   return { available: compareVersions(release.version, currentVersion) > 0, release };
 }
 
@@ -394,7 +447,7 @@ async function validateInBackground({ candidateDir, archiveManifest, executableN
 }
 
 async function prepareUpdate({ release, installDir, executableName, packageName = 'dsh-mathmodel-desktop',
-  appId = APP_ID, userDataDir, cacheDir, currentVersion, allowLoopbackHttp = false, onProgress, nodeBin }) {
+  appId = APP_ID, userDataDir, homeDir, cacheDir, currentVersion, allowLoopbackHttp = false, onProgress, nodeBin }) {
   if (process.platform !== 'win32') throw new Error('Desktop self-update is Windows-only');
   const valid = validateRelease(release, { appId, allowLoopbackHttp });
   if (compareVersions(valid.version, currentVersion) <= 0) throw new Error('Release is not newer than installed app');
@@ -443,10 +496,14 @@ async function prepareUpdate({ release, installDir, executableName, packageName 
     const probe = path.join(parent, `.dsh-write-${nonce}`);
     await fsp.writeFile(probe, '', { flag: 'wx' });
     await fsp.unlink(probe);
+    const format = sessionFormatChange(resolved, candidate);
+    if (format.changed && !homeDir) throw new Error('DSH home is required for session format backup');
     const job = { schema: 'dsh.desktop-update-job/v1', nonce, kind: 'update', state: 'prepared',
       appId, fromVersion: currentVersion, toVersion: valid.version, executableName, packageName,
       installDir: resolved, previousDir: previous, candidateDir: candidate, extractionDir: extraction,
-      userDataDir: state, archiveSha256: valid.windows.x64.sha256, candidateSha256,
+      userDataDir: state, homeDir: homeDir ? path.resolve(homeDir) : undefined,
+      sessionFormatFrom: format.from, sessionFormatTo: format.to,
+      archiveSha256: valid.windows.x64.sha256, candidateSha256,
       createdAt: new Date().toISOString(),
       jobPath, bootMarker: `${jobPath}.boot-ok`, workerReady: `${jobPath}.worker-ready` };
     await atomicJson(jobPath, job);
@@ -463,7 +520,7 @@ async function prepareUpdate({ release, installDir, executableName, packageName 
   }
 }
 
-async function prepareRollback({ installDir, executableName, userDataDir, nodeBin, currentVersion }) {
+async function prepareRollback({ installDir, executableName, userDataDir, homeDir, nodeBin, currentVersion }) {
   let last;
   try { last = JSON.parse(fs.readFileSync(path.join(path.resolve(userDataDir), 'desktop-updates', 'last-successful-update.json'), 'utf8')); }
   catch (error) {
@@ -484,10 +541,23 @@ async function prepareRollback({ installDir, executableName, userDataDir, nodeBi
       cache: path.dirname(last.jobPath), nonce, nodeBin });
   } else previousSha256 = treeDigest(last.previousDir);
   if (!last.previousSha256 || previousSha256 !== last.previousSha256) throw new Error('Previous release changed after the update');
+  const format = sessionFormatChange(resolved, last.previousDir);
+  let restoreDataSnapshot;
+  if (format.changed) {
+    if (!homeDir || !last.dataSnapshot) throw new Error('Previous session data snapshot is unavailable');
+    const { assertSnapshotBackup } = require('./update-data-snapshot.cjs');
+    const roots = assertSnapshotBackup(last.dataSnapshot);
+    if (last.dataSnapshot.nonce !== last.nonce || roots.home !== path.resolve(homeDir)
+      || roots.userData !== path.resolve(userDataDir)) throw new Error('Previous data snapshot identity mismatch');
+    restoreDataSnapshot = last.dataSnapshot;
+  }
   const job = { ...last, nonce, kind: 'rollback', state: 'prepared',
     fromVersion: last.toVersion, toVersion: last.fromVersion,
     candidateDir: last.previousDir, previousDir: path.join(parent, `.dsh-undone-${nonce}`),
-    extractionDir: null, createdAt: new Date().toISOString(), jobPath,
+    extractionDir: null, homeDir: homeDir ? path.resolve(homeDir) : undefined,
+    sessionFormatFrom: format.from, sessionFormatTo: format.to,
+    restoreDataSnapshot, dataSnapshot: undefined,
+    createdAt: new Date().toISOString(), jobPath,
     bootMarker: `${jobPath}.boot-ok`, workerReady: `${jobPath}.worker-ready` };
   job.candidateSha256 = previousSha256;
   await atomicJson(jobPath, job);
@@ -524,10 +594,19 @@ async function launchUpdate(job, { currentPid = process.pid, nodeBin, timeoutMs 
   if (!job || job.state !== 'prepared' || !fs.existsSync(job.jobPath)) throw new Error('Update job is not prepared');
   if (!Number.isSafeInteger(currentPid) || currentPid <= 0) throw new Error('Invalid current desktop PID');
   if (!nodeBin || !fs.statSync(nodeBin).isFile()) throw new Error('Bundled Node executable missing');
-  const workerDir = path.dirname(job.jobPath);
+  const crossesSessionFormat = job.sessionFormatFrom !== undefined && job.sessionFormatFrom !== job.sessionFormatTo;
+  const workerDir = crossesSessionFormat
+    ? path.join(os.homedir(), '.dsh-desktop-update-workers') : path.dirname(job.jobPath);
+  if (crossesSessionFormat) {
+    const { assertSeparateRoots, ensurePrivateDirectory } = require('./update-data-snapshot.cjs');
+    ensurePrivateDirectory(workerDir);
+    assertSeparateRoots(job.homeDir, job.userDataDir, workerDir);
+  }
   const workerPath = path.join(workerDir, `${job.nonce}.worker.cjs`);
   const workerNode = path.join(workerDir, `${job.nonce}.node.exe`);
+  const workerSnapshot = path.join(workerDir, `${job.nonce}.snapshot.cjs`);
   await fsp.copyFile(path.join(__dirname, 'update-worker.cjs'), workerPath, fs.constants.COPYFILE_EXCL);
+  await fsp.copyFile(path.join(__dirname, 'update-data-snapshot.cjs'), workerSnapshot, fs.constants.COPYFILE_EXCL);
   // nodeBin lives inside the install tree. Copy the executable out before the
   // swap so Windows has no image mapping into the directory being renamed.
   await fsp.copyFile(nodeBin, workerNode, fs.constants.COPYFILE_EXCL);

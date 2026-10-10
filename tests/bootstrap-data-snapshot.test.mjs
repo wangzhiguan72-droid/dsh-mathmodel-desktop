@@ -139,6 +139,44 @@ test('user-data stage rename failure restores both changed live roots and preser
   }
 });
 
+test('pre-existing restore stage is never deleted when preparation rejects it', () => {
+  const f = fixture();
+  try {
+    const record = snapshotData(f);
+    fs.writeFileSync(path.join(f.home, 'session.json'), 'live session after snapshot');
+    fs.writeFileSync(path.join(f.userData, 'state.json'), 'live state after snapshot');
+    const homeStage = `${f.home}.dsh-restore-${f.nonce}`;
+    const dataStage = `${f.userData}.dsh-restore-${f.nonce}`;
+    fs.mkdirSync(dataStage);
+    fs.writeFileSync(path.join(dataStage, 'keep.txt'), 'unrelated existing stage sentinel');
+    assert.throws(() => restoreData(record), { code: 'EEXIST' });
+    assert.equal(fs.existsSync(homeStage), false);
+    assert.equal(fs.readFileSync(path.join(dataStage, 'keep.txt'), 'utf8'), 'unrelated existing stage sentinel');
+    assert.equal(fs.readFileSync(path.join(f.home, 'session.json'), 'utf8'), 'live session after snapshot');
+    assert.equal(fs.readFileSync(path.join(f.userData, 'state.json'), 'utf8'), 'live state after snapshot');
+    assert.equal(fs.readFileSync(path.join(record.backup, 'home', 'session.json'), 'utf8'), 'original secret sentinel');
+  } finally {
+    fs.unlinkSync(path.join(f.home, 'skills'));
+    fs.unlinkSync(path.join(f.backupRoot, `dsh-desktop-bootstrap-${f.nonce}`, 'home', 'skills'));
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('pre-existing backup directory survives a duplicate snapshot nonce', () => {
+  const f = fixture();
+  try {
+    const backup = path.join(f.backupRoot, `dsh-desktop-bootstrap-${f.nonce}`);
+    fs.mkdirSync(backup);
+    fs.writeFileSync(path.join(backup, 'keep.txt'), 'unrelated backup sentinel');
+    assert.throws(() => snapshotData(f), { code: 'EEXIST' });
+    assert.equal(fs.readFileSync(path.join(backup, 'keep.txt'), 'utf8'), 'unrelated backup sentinel');
+    assert.equal(fs.readFileSync(path.join(f.home, 'session.json'), 'utf8'), 'original secret sentinel');
+  } finally {
+    fs.unlinkSync(path.join(f.home, 'skills'));
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('recovery copies dangling in-profile junctions and keeps Windows link kinds', { skip: process.platform !== 'win32' }, () => {
   const f = fixture();
   const targetDir = path.join(f.home, 'profiles', 'mathmodel', 'node_modules', 'pkg');

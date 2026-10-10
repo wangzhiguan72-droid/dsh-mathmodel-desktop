@@ -4,12 +4,32 @@
 // It must not depend on the application tree being replaced.
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const exists = filename => fs.existsSync(filename);
 const hasExited = child => child.exitCode !== null || child.signalCode !== null;
+
+function sessionFormat(root) {
+  const filename = path.join(root, 'resources', 'runtime', 'host', 'node_modules',
+    '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
+  if (!exists(filename)) return null;
+  const stat = fs.lstatSync(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe session format source');
+  const matches = [...fs.readFileSync(filename, 'utf8').matchAll(/\bconst SESSION_FORMAT_VERSION\s*=\s*(\d+)\s*;/g)];
+  if (matches.length !== 1) throw new Error('Cannot identify bundled session format');
+  return Number(matches[0][1]);
+}
+
+function dataModule(job, options = {}) {
+  if (options.dataModule) return options.dataModule;
+  const filename = path.basename(__filename) === 'update-worker.cjs'
+    ? path.join(__dirname, 'update-data-snapshot.cjs')
+    : path.join(__dirname, `${job.nonce}.snapshot.cjs`);
+  return require(filename);
+}
 
 function writeJson(filename, value) {
   const temporary = `${filename}.${process.pid}.tmp`;
@@ -120,6 +140,22 @@ async function validateJob(job, filename) {
     || await treeDigestAsync(job.candidateDir) !== job.candidateSha256) throw new Error('Staged release changed after verification');
   if (exists(job.previousDir)) throw new Error('Previous slot already exists');
   if (!fs.statSync(path.join(job.candidateDir, job.executableName)).isFile()) throw new Error('Candidate executable missing');
+  const from = sessionFormat(install), to = sessionFormat(job.candidateDir);
+  if ((from === null) !== (to === null)) throw new Error('Session format unavailable in one release');
+  if (job.sessionFormatFrom !== undefined && job.sessionFormatFrom !== from) throw new Error('Installed session format changed');
+  if (job.sessionFormatTo !== undefined && job.sessionFormatTo !== to) throw new Error('Staged session format changed');
+  if (from !== to) {
+    if (!job.homeDir || !path.isAbsolute(job.homeDir)) throw new Error('DSH home is required for session format backup');
+    const data = dataModule(job);
+    const backupRoot = path.join(os.homedir(), '.dsh-desktop-update-backups');
+    data.ensurePrivateDirectory(backupRoot);
+    data.assertSeparateRoots(job.homeDir, job.userDataDir, backupRoot);
+    if (job.kind === 'rollback') {
+      const roots = data.assertSnapshotBackup(job.restoreDataSnapshot);
+      if (roots.home !== job.homeDir || roots.userData !== job.userDataDir
+        || job.restoreDataSnapshot.nonce === job.nonce) throw new Error('Rollback data snapshot identity mismatch');
+    }
+  }
 }
 
 function pinOldProcess(pid) {
@@ -297,10 +333,24 @@ async function transact(job, oldPid, oldStart, oldExited, options = {}) {
       if (await treeDigestAsync(job.candidateDir) !== job.candidateSha256) throw new Error('Staged release changed while waiting for exit');
       job.previousSha256 = await treeDigestAsync(job.installDir);
     }
+    if (sessionFormat(job.installDir) !== sessionFormat(job.candidateDir)) {
+      const data = dataModule(job, options);
+      const backupRoot = path.join(os.homedir(), '.dsh-desktop-update-backups');
+      data.ensurePrivateDirectory(backupRoot);
+      data.assertSeparateRoots(job.homeDir, job.userDataDir, backupRoot);
+      job.dataSnapshot = data.snapshotData({ home: job.homeDir, userData: job.userDataDir,
+        backupRoot, nonce: job.nonce });
+      data.assertSnapshotCurrent(job.dataSnapshot);
+      writeJson(job.jobPath, job);
+    }
     fs.renameSync(job.installDir, job.previousDir);
     oldMoved = true;
     fs.renameSync(job.candidateDir, job.installDir);
     candidateMoved = true;
+    if (job.restoreDataSnapshot) {
+      const data = dataModule(job, options);
+      data.restoreData(job.restoreDataSnapshot);
+    }
     const env = { ...process.env, DSH_DESKTOP_UPDATE_JOB: job.jobPath,
       DSH_DESKTOP_UPDATE_NONCE: job.nonce };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -343,6 +393,10 @@ async function transact(job, oldPid, oldStart, oldExited, options = {}) {
         job.failedDir = failedDir;
       }
       if (oldMoved) fs.renameSync(job.previousDir, job.installDir);
+      if (candidateMoved && job.dataSnapshot) {
+        const data = dataModule(job, options);
+        data.restoreData(job.dataSnapshot);
+      }
       const restoreEnv = { ...process.env, DSH_DESKTOP_UPDATE_RECOVERED: job.nonce };
       delete restoreEnv.ELECTRON_RUN_AS_NODE;
       delete restoreEnv.DSH_DESKTOP_UPDATE_JOB;
