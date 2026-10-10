@@ -5,18 +5,12 @@ nodeLinker: hoisted
 autoInstallPeers: false
 ignoreWorkspaceRootCheck: true
 
-# dsh-better-sidebar 0.18.0 pins the whole 0.1.2-rc.1 kernel cohort
-# (dsh-agent -> dsh-llm, dsh-session, ...), whose copies shadow the 0.1.5 host
-# closure in the profile tree and break ESM imports. 0.19.1 targets the
-# 0.1.5-rc.1 cohort. The @deepseek-ai overrides keep the dsh-mathmodel
-# plugin's own 0.1.1-rc.2 framework copies (cordis, dsh-invariants,
-# dsh-typert-protocol) aligned with what the 0.1.5-rc.1 host ships; bump
-# together with runtime/host/package.json.
+# Keep the profile's framework identity aligned with the rc.2 host.
+# Family 0.4.5 no longer depends on the legacy third-party sidebar.
 overrides:
-  dsh-better-sidebar: 0.19.1
-  '@deepseek-ai/cordis': 4.0.2
-  '@deepseek-ai/dsh-invariants': 0.1.5-rc.2
-  '@deepseek-ai/dsh-typert-protocol': 0.1.5-rc.2
+  '@deepseek-ai/cordis': 4.0.4
+  '@deepseek-ai/schemastery': 3.18.4
+  '@deepseek-ai/dsh-typert-protocol': 0.2.0-rc.2
 
 supportedArchitectures:
   os:

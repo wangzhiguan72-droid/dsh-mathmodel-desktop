@@ -6,9 +6,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveRuntimeFile } from '../support/runtime.mjs';
 
-test('官方 rc.3 预设发现与读取接受真实目录中的组合文件', async () => {
+test('官方 rc.3 预设发现与读取接受真实目录中的组合文件', async (t) => {
   const harnessManifest = await resolveRuntimeFile('@deepseek-ai/dsh/package.json');
-  assert.equal(JSON.parse(await readFile(harnessManifest, 'utf8')).version, '0.1.5-rc.3');
+  const version = JSON.parse(await readFile(harnessManifest, 'utf8')).version;
+  if (version !== '0.1.5-rc.3') return t.skip(`此用例验证旧内核 0.1.5-rc.3，当前运行时为 ${version}`);
+  assert.equal(version, '0.1.5-rc.3');
   const packagePath = await resolveRuntimeFile('@deepseek-ai/dsh-agent-presets/lib/index.js');
   const { agentPresetProjectionDefinition, discoverPresets, readComposition } = await import(pathToFileURL(packagePath).href);
   assert.equal(agentPresetProjectionDefinition.init({ agentPreset: 'standard' }), 'standard');

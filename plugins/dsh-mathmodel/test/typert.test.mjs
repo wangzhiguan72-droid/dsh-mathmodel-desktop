@@ -1,7 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Context } from '@deepseek-ai/cordis';
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol';
 import { TYPERT } from '../lib/typert.host.js';
 import { TYPERT_REMOTE } from '../lib/typert.remote-client.js';
+import { MathmodelCardsGateway } from '../lib/host.js';
+
+test('新版 Cordis 与 Typert 实际注册卡片 Remote 并执行调用', async () => {
+  const ctx = new Context();
+  const cards = {
+    list: async () => ['card'],
+    help: async () => ({ title: 'help' }),
+    render: async () => ({ text: 'draft' }),
+  };
+  const gateway = new MathmodelCardsGateway(ctx, cards);
+  assert.equal(ctx.get('mathmodelCards').name, 'mathmodelCards');
+  assert.deepEqual(remoteMethods(gateway).map((entry) => entry.method), ['list', 'help', 'render']);
+  assert.deepEqual(await gateway.list(), ['card']);
+  assert.deepEqual(await gateway.render(), { text: 'draft' });
+});
 
 test('Client 与 Host Remote 端点完全一致', () => {
   assert.deepEqual(

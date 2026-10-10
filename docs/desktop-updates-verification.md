@@ -1,4 +1,16 @@
-# 桌面更新与回滚（2026-10-09）
+# 桌面更新与回滚（2026-10-10）
+
+## 0.1.3 官方内核升级
+
+当前源码目标为桌面 0.1.3，内置官方 Harness 0.2.0-rc.2、Web 插件家族 0.4.5，仍是通用编程桌面端。RC2 原生 Git Graph 已支持工作区自动隔离；本地插件适配新版 SettingsForms、附件和 Typert 通信接口。旧连接设置由旧 settings.yaml 或其 .imported 文件导入新的用户配置，并保持原凭据存储。
+
+官方会话格式由 V3 变为 V4，旧内核无法读取新版写入的会话。默认更新清单对旧 0.1.2 先提供 0.1.3-bridge.1（保留旧内核、装入受保护的更新器），新版更新器才选择清单 upgrades 中的 0.1.3。更新前完整快照应用 home 与 Electron userData；外部共享技能链接保留且不复制外部库，更新助手在数据目录外运行。新内核启动前核对快照身份，旧更新器直接跳过准备版的请求会被拒绝。启动失败恢复旧程序和旧数据；手动回滚先保存新版数据，再恢复旧快照。
+
+已完成 137 项插件测试、真实新内核窗口 11 个子插件且无降级、准备版窗口 13 个子插件且无降级。左下角更新按钮突出显示、点击确认和取消不下载已实测。真实官方持久化与实际更新 worker 已验证失败恢复、V3→V4 写入及手动回滚保留 V4 副本；该交易测试使用模拟应用壳，打包 Electron 启动另行实测。首次引导升级的保护字段及失败恢复已通过 9 项回归测试。
+
+本机已通过实际旧 0.1.2 更新器先升级至准备版，再由受保护的新更新器升级至 0.1.3。新内核窗口和宿主健康检查通过；独立复核确认原子切换前快照中的 7 个会话文件逐字节保留、3 个连接按规范化后的设置语义一致、凭据与 hooks 不变、共享技能链接及原卸载程序不变，注册表及 EXE 版本为 0.1.3。旧程序和完整数据快照保留。初始验证脚本在旧窗口还运行时过早采集会话基线，旧窗口在准备期间的保存触发了误报；已改为使用旧窗口退出后、原子切换前的快照核对，独立复核通过。
+
+证据位于 dist/kernel-upgrade-0.1.3：desktop-tests-protected-final.txt（141/141）、plugin-tests-final.txt（137/137）、plugin-harness-final.txt、gui-update-entry-verification.json、verification.json（31,549 个 ZIP/NSIS 文件完整校验）、real-session-migration-verification.json、real-updater-transaction-verification.json、bootstrap-guard-tests-passed.txt、personal-kernel-independent-check.json。本机升级已完成；公开发布及匿名下载以 publication-result.json 和 published-release-verification.json 为准。后续章节保留 0.1.2 历史实测结果。
 
 当前桌面修复包为 0.1.2，内置 Harness 保持已适配的 0.1.5-rc.3。Harness 原有的 GUI 左下角更新按钮现接入桌面更新：平时显示当前桌面版本，发现新版后突出显示；点击查看版本及说明，确认后才下载，准备完成后再次确认安装和重启。菜单可检查更新、恢复上一版或修改更新源，也可以关闭启动时检查。
 
@@ -8,7 +20,7 @@
 
 此前 0.1.1 的原生桌面更新角标与 Harness 自带的左下角更新按钮并存，用户点击后者仍可能看到 pnpm 更新流程。0.1.2 将固定版本的 web 组件接入 Electron 的 `getState`、`onState`、`open` 桥，由同一桌面确认窗口控制下载与安装；原生角标仅在旧版或自定义 web 界面没有接入该按钮时显示。桌面宿主的旧更新状态接口仍返回 HTTP 200，但标记为 `mode: desktop`、`outdated: false`；旧执行接口返回 HTTP 409 `desktop-managed`，阻止从桌面侧栏执行 pnpm。普通 CLI 与浏览器环境保留原行为。
 
-实际打包 GUI 验证确认原左下角按钮接入、备用角标隐藏、13 个子插件健康且无降级；模拟可用版本时按钮高亮、点击打开桌面更新确认窗口，选择“稍后”时没有下载。默认线上清单尚未发布时，检查结果为“更新源尚未提供更新清单”，按钮不高亮。记录见 `dist/update-entry-fixed-0.1.2/gui-update-entry-verification.json`。Chromium 网络请求改为逐跳检查地址后主动跟随，真实 Electron 测试通过三次安全重定向，并拒绝超出上限、跳到 HTTP 或带 URL 凭据的地址。
+实际打包 GUI 验证确认原左下角按钮接入、备用角标隐藏、13 个子插件健康且无降级；模拟可用版本时按钮高亮、点击打开桌面更新确认窗口，选择“稍后”时没有下载。发布前默认线上清单缺失时，检查结果为“更新源尚未提供更新清单”，按钮不高亮；这是当时的缺失场景验证。记录见 `dist/update-entry-fixed-0.1.2/gui-update-entry-verification.json`。Chromium 网络请求改为逐跳检查地址后主动跟随，真实 Electron 测试通过三次安全重定向，并拒绝超出上限、跳到 HTTP 或带 URL 凭据的地址。
 
 0.1.2 的 `dist/update-entry-fixed-0.1.2` 成品已核对 43,557 个 ZIP/NSIS 条目 CRC、14 个 ZIP 关键文件、6 个 NSIS 改动文件及源码与包内接线一致性。桌面测试 `node --test --test-concurrency=1 tests/*.test.mjs` 为 123/123，无跳过；原始输出见该目录的 `desktop-tests.txt`。
 
@@ -67,16 +79,17 @@
 
 本地构建和测试不会发布 GitHub Release。线上渠道需同时上传完整 Windows ZIP 和根据实际 ZIP 生成的 `desktop-update.json`。本机 0.1.0 的历史首次迁移由当时的维护者工具执行；0.1.1 起具备桌面更新逻辑，0.1.2 将 Harness 原左下角按钮接入该逻辑。历史 0.1.0 NSIS 卸载器带有删除个人目录的旧逻辑，不能用应用内 ZIP 更新或引导工具的结果推断传统 NSIS 覆盖安装安全。
 
-维护者在仓库根目录运行以下预检；工具默认检查 `dist/update-entry-fixed-0.1.2`，命令已对当前 0.1.2 的五项成品实跑通过，只读取本地文件，不请求 Git 凭据或修改 GitHub：
+维护者在仓库根目录运行以下预检；准备版与内核版各核对五项成品，内核版同时核对准备版下载路线。只读取本地文件，不请求 Git 凭据或修改 GitHub：
 
 ```sh
-node scripts/publish-desktop-release.mjs --plan
+node scripts/publish-desktop-release.mjs --plan --version 0.1.3-bridge.1 --release-dir dist/updater-bridge-0.1.3-bridge.1
+node scripts/publish-desktop-release.mjs --plan --version 0.1.3 --release-dir dist/kernel-upgrade-0.1.3 --bridge-dir dist/updater-bridge-0.1.3-bridge.1
 ```
 
 预检逐一核对 ZIP、NSIS、`desktop-update.json`、`SHA256SUMS.txt` 和发布说明，并要求清单中的版本、下载 URL、ZIP 字节数及 SHA-256 与已验证成品一致。发布工具的 14 项离线测试覆盖标签与批准提交不一致、上传失败、资产摘要缺失、续传草稿和请求超时；`node --test tests/release-publication.test.mjs` 已实跑 14/14 通过。这些测试使用模拟的 GitHub 响应，不证明线上发布成功。
 
-公开发布需要先确定与 0.1.2 成品对应的源码提交，将 `v0.1.2` 标签指向该提交并验证远端一致，再取得公开发布授权。发布模式必须提供完整提交 SHA；工具先建立草稿，上传五项文件，核对远端每个文件的大小和 SHA-256，再复查标签与草稿身份，最后公开为最新版本。已有草稿需明确提供草稿 ID 才能续传；任一核对失败时不执行发布步骤。工具返回发布状态后，还需匿名读取线上最新 Release 与实际 `desktop-update.json`，确认下载可用，才可声称应用内渠道上线。目前这一步尚未执行。
+v0.1.2 已按授权公开发布：[GitHub Release](https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/tag/v0.1.2)，Release ID 为 `407793212`。远端标签解析到与已验证成品对应的源码提交 `7c1a31e89d1582b73bb8fa20f67e595c23b833d2`。发布工具先建立草稿，上传并核对五项文件的大小和 SHA-256，再复查标签与草稿身份后公开为最新版本。匿名读取已确认最新 Release 和默认地址的 `desktop-update.json` 存在，清单 HTTP 200 且内容摘要与本地一致；完整线上 ZIP 匿名下载得到 412,623,342 字节，SHA-256 `d2646e913bf8d80b63534efd8322b76303ef54c65b0384b37038d68615fb79a2`，与本地最终成品一致。实际 Electron 从默认地址检查到 0.1.2：旧版能识别新版，本机已安装的 0.1.2 返回最新状态。发布与完整下载记录见 `dist/update-entry-fixed-0.1.2/published-release-verification.json`；Electron 记录见同目录的 `published-channel-electron.json`。
 
-2026-10-08 读取 GitHub 发行状态：最新为 v0.1.0，未附 `desktop-update.json`；记录为 `dist/desktop-updates-verified/release-access.json`。0.1.1 候选包未发布，当前 0.1.2 的本地清单与成品也未上传或发布。2026-10-06 的默认清单地址 HTTP 404 是历史检查结果，见 `channel-status.json`；0.1.2 实际 GUI 再次确认当前清单缺失时给出明确提示，不能把本地预检当成线上渠道可用。
+发布前的历史状态：2026-10-08 读取 GitHub 时最新为 v0.1.0，未附 `desktop-update.json`，见 `dist/desktop-updates-verified/release-access.json`；2026-10-06 默认清单地址返回 HTTP 404，见同目录的 `channel-status.json`。0.1.1 候选包未发布。这些记录解释此前的缺失清单提示，不代表当前 v0.1.2 渠道状态。后续如需让 0.1.2 用户看到更新，维护者还须构建、验证并发布更高版本，用户再在左下角决定是否下载和安装。
 
 下载完整性使用 HTTPS 与清单 SHA-256；本项目尚无代码签名或独立签名密钥。NSIS 原版本卸载器参与的安装覆盖升级，与上述应用内 ZIP 更新为不同路径，不能用本项结果代替所有历史版本覆盖安装测试。

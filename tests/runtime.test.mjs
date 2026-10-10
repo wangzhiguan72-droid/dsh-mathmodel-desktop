@@ -26,9 +26,22 @@ const {
   findHostPort,
   isPortFree,
   SEED_MARKER,
+  EXPECTED_WEB_FAMILY_ROWS,
+  hasCompleteWebFamily,
   ensureProfileFallbacks,
   checkVcRuntime,
 } = require('../src/runtime.cjs');
+
+test('update boot requires every default 0.4.5 row and allows known opt-ins', () => {
+  assert.equal(EXPECTED_WEB_FAMILY_ROWS.length, 11);
+  assert.equal(hasCompleteWebFamily({ children: EXPECTED_WEB_FAMILY_ROWS }), true);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS].reverse() }), true);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS, '@linxin666/dsh-ssh'] }), true);
+  assert.equal(hasCompleteWebFamily({ children: EXPECTED_WEB_FAMILY_ROWS.slice(1) }), false);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS.slice(1), '@linxin666/unexpected'] }), false);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS.slice(1), EXPECTED_WEB_FAMILY_ROWS[1]] }), false);
+  assert.equal(hasCompleteWebFamily({ children: null }), false);
+});
 
 test('update readiness waits for its own authenticated host after HTTP begins responding', async t => {
   const server = http.createServer((_request, response) => { response.end('loading'); });

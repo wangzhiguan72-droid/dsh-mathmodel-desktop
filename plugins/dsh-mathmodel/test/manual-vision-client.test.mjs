@@ -47,6 +47,40 @@ test('手动附图只写回草稿，不自动发送，并在成功后移除原�
   assert.match(state.notices.at(-1)[1], /视觉工具/);
 });
 
+test('新版 Conversation 附件 ID 中仅转换图片，保留普通文件草稿', async () => {
+  let draft = '分析附图';
+  let attachmentIds = ['image-one', 'file-one'];
+  const released = [];
+  const input = {
+    state: { getSnapshot: () => ({ draft, attachmentIds }) },
+    setDraft: (value) => { draft = value; },
+    removeAttachment: (id) => { attachmentIds = attachmentIds.filter((item) => item !== id); },
+    notify() {},
+  };
+  const attachments = [
+    { id: 'image-one', kind: 'image', file: { name: '图.png' } },
+    { id: 'file-one', kind: 'file', file: { name: '数据.csv' } },
+  ];
+  const actions = createManualVisionActions({
+    stage: async (images) => {
+      assert.deepEqual(images.map((item) => item.name), ['图.png']);
+      return { files: [{ name: '图.png', path: 'uploads/image-one.png' }] };
+    },
+    workspaceOf: () => 'F:\\工作区',
+    draftImages: (ids) => attachments.filter((attachment) => ids.includes(attachment.id)),
+    releaseDraftImages: (selected) => released.push(...selected.map((attachment) => attachment.id)),
+    inputForSession: () => input,
+    notify() {},
+    encodeImage: async (file) => ({ mediaType: 'image/png', data: 'iVBORw==', name: file.name }),
+  });
+  const imageIds = actions.imageIdsForInput({ attachmentIds });
+  assert.deepEqual(imageIds, ['image-one']);
+  await actions.stageToDraft({ sessionId: 'session-1', imageIds });
+  assert.deepEqual(attachmentIds, ['file-one']);
+  assert.deepEqual(released, ['image-one']);
+  assert.match(draft, /uploads\/image-one\.png/);
+});
+
 test('会话没有工作区时附图失败且不改写草稿', async () => {
   const state = fixture();
   const actions = createManualVisionActions({

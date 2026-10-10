@@ -11,6 +11,8 @@ import {
 } from '../lib/index.js';
 
 test('接受白名单内的 DeepSeek Harness 版本', () => {
+  assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.1.5-rc.3'));
+  assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.2.0-rc.2'));
   for (const version of SUPPORTED_DSH_VERSIONS) {
     assert.equal(assertCompatibleHarnessVersion(version), version);
   }
@@ -25,6 +27,7 @@ test('错误版本给出可操作的中文错误', () => {
 
 test('未知版本失败关闭', () => {
   assert.throws(() => assertCompatibleHarnessVersion(null), /当前 未检测到/);
+  assert.throws(() => assertCompatibleHarnessVersion('0.2.1-alpha.2'), /当前 0\.2\.1-alpha\.2/);
 });
 
 test('从独立 npm 包解析锚点发现 Harness 版本', async () => {

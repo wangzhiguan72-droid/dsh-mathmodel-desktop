@@ -22,7 +22,7 @@ async function fixture(t, answers, savedSettings, coreOverrides = {}) {
     quit: () => calls.push(['quit']) };
   const controller = createUpdateController({ app, getWindow: () => window, getNodeBin: () => 'owned-node.exe', log: () => {},
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
-    dialog: { showMessageBox: async (_window, options) => { calls.push(['dialog', options.title]); return { response: answers.shift() ?? 1 }; } },
+    dialog: { showMessageBox: async (_window, options) => { calls.push(['dialog', options.title, options]); return { response: answers.shift() ?? 1 }; } },
     core: { checkForUpdate: async () => { calls.push(['check']); return { available: true, release: { version: '0.1.2', notes: 'fixture' } }; },
       prepareUpdate: async () => { calls.push(['prepare']); return { toVersion: '0.1.2' }; },
       launchUpdate: async () => { calls.push(['worker-ready']); },
@@ -96,4 +96,15 @@ test('missing release feed clears stale availability without offering an upstrea
   assert.match(controller.getState().detail, /尚未提供更新清单/);
   await controller.open();
   assert.equal(calls.some(([name]) => ['prepare', 'worker-ready', 'quit'].includes(name)), false);
+});
+
+test('cross-format manual rollback explains data rewind and preserves the cancel gate', async t => {
+  const job = { kind: 'rollback', toVersion: '0.1.2', restoreDataSnapshot: { backup: 'fixture' } };
+  const { controller, calls } = await fixture(t, [1], undefined, { prepareRollback: async () => job });
+  await controller.rollback();
+  const prompt = calls.find(([name, title]) => name === 'dialog' && title === '安装桌面更新')?.[2];
+  assert.match(prompt.message, /升级前的数据/);
+  assert.match(prompt.detail, /升级后产生的数据将另存备份/);
+  assert.equal(prompt.cancelId, 1);
+  assert.equal(calls.some(([name]) => ['worker-ready', 'quit'].includes(name)), false);
 });

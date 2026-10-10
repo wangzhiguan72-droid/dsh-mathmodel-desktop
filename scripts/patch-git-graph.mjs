@@ -1,16 +1,54 @@
-// Adapt the pinned Git Graph 0.3.23 browser bundle to the rc.3 split between
-// Workspace Controller data and uiWorkspace navigation. Run on a staged
-// profile, before packaging; never edit a user's installed profile.
+// Adapt Git Graph 0.3.23 to the rc.3 Workspace Controller split. Version 0.4.5
+// has its own implementation; validate that implementation before packaging.
+// Never edit a user's installed profile.
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageName = '@linxin666/dsh-client-ui-git-graph'
 const aggregateName = '@linxin666/dsh-web-all'
-const expectedVersion = '0.3.23'
+const legacyVersion = '0.3.23'
+const nativeVersion = '0.4.5'
 const markers = ['\t\t//#region src/client/auto-isolation.ts',
   '\t\t//#region ../dsh-git-graph/src/client/auto-isolation.ts']
 const endMarker = '\t\t//#endregion'
+
+function autoIsolationRegion(source) {
+  const found = markers.filter(marker => source.includes(marker))
+  if (found.length !== 1) throw new Error('Git Graph auto-isolation region missing or ambiguous')
+  const start = source.indexOf(found[0])
+  if (source.indexOf(found[0], start + found[0].length) >= 0) throw new Error('Duplicate Git Graph auto-isolation region')
+  const end = source.indexOf(endMarker, start)
+  if (end < 0) throw new Error('Git Graph auto-isolation region missing')
+  return { start, end, section: source.slice(start, end) }
+}
+
+function requireOnce(source, anchor) {
+  const first = source.indexOf(anchor)
+  if (first < 0 || source.indexOf(anchor, first + anchor.length) >= 0) {
+    throw new Error(`Git Graph 0.4.5 native isolation shape changed: ${anchor}`)
+  }
+}
+
+/** Confirm the 0.4.5 bundle owns the rc.2 navigation split without a local patch. */
+export function validateNativeGitGraphSource(source) {
+  const { section } = autoIsolationRegion(source)
+  for (const anchor of [
+    'function probeWorkspaces(navigation, registry)',
+    'const probe = probeWorkspaces(scope.uiWorkspace, scope.workspaces);',
+    'original = navigation.startSession;',
+    'const target = resolveTarget(workspaceId);',
+    'const workspace = await registry.create({ path: created.value.path });',
+    'original.call(navigation, workspace.workspaceId);',
+    'navigation.startSession = routed;',
+    'navigation.startSession = original;',
+  ]) requireOnce(section, anchor)
+  if (!/const current = mainViewSessionId(?:\$\d+)?\(scope\.sessions\.list\.getSnapshot\(\)\.byId\);/.test(section) ||
+      !/ctx\.inject\(\[\s*"workspaces",\s*"sessions",\s*"uiWorkspace"\s*\], \(worktreeScope\) => \{/.test(source)) {
+    throw new Error('Git Graph 0.4.5 native isolation shape changed: navigation injection or target selection')
+  }
+  return source
+}
 
 function replaceOnce(source, before, after) {
   const first = source.indexOf(before)
@@ -21,13 +59,7 @@ function replaceOnce(source, before, after) {
 }
 
 export function patchGitGraphSource(source) {
-  const found = markers.filter(marker => source.includes(marker))
-  if (found.length !== 1) throw new Error('Git Graph auto-isolation region missing or ambiguous')
-  const start = source.indexOf(found[0])
-  if (source.indexOf(found[0], start + found[0].length) >= 0) throw new Error('Duplicate Git Graph auto-isolation region')
-  const end = source.indexOf(endMarker, start)
-  if (start < 0 || end < 0) throw new Error('Git Graph auto-isolation region missing')
-  const before = source.slice(start, end)
+  const { start, end, section: before } = autoIsolationRegion(source)
   if (before.includes('const uiWorkspace = probeUiWorkspace(scope.uiWorkspace)')) {
     if (!source.includes('ctx.inject(["workspaces", "sessions", "uiWorkspace"], (worktreeScope) => {')) {
       throw new Error('Partial Git Graph rc.3 patch: navigation injection is missing')
@@ -82,27 +114,31 @@ export function patchGitGraphSource(source) {
 
 export async function patchGitGraphProfile(profileDir) {
   const patches = []
+  let version
   for (const name of [packageName, aggregateName]) {
     const packageDir = path.join(profileDir, 'node_modules', ...name.split('/'))
     const meta = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'))
-    if (meta.name !== name || meta.version !== expectedVersion) {
+    if (meta.name !== name || ![legacyVersion, nativeVersion].includes(meta.version) ||
+        (version !== undefined && meta.version !== version)) {
       throw new Error(`Unsupported Git Graph package: ${meta.name}@${meta.version}`)
     }
+    version = meta.version
     const bundle = path.join(packageDir, 'lib', 'client.js')
     const before = await readFile(bundle, 'utf8')
-    patches.push({ bundle, before, after: patchGitGraphSource(before) })
+    patches.push({ bundle, before, after: version === nativeVersion
+      ? validateNativeGitGraphSource(before) : patchGitGraphSource(before) })
   }
   // Validate both embedded copies before writing either staged bundle.
   for (const { bundle, before, after } of patches) {
     if (after !== before) await writeFile(bundle, after)
   }
   return { changed: patches.some(({ before, after }) => before !== after),
-    bundle: patches[0].bundle, bundles: patches.map(({ bundle }) => bundle) }
+    version, bundle: patches[0].bundle, bundles: patches.map(({ bundle }) => bundle) }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const profileDir = process.argv[2]
   if (!profileDir) throw new Error('Usage: node scripts/patch-git-graph.mjs <staged-profile-directory>')
   const result = await patchGitGraphProfile(path.resolve(profileDir))
-  console.log(`Git Graph rc.3 compatibility ${result.changed ? 'patched' : 'already applied'}: ${result.bundles.join(', ')}`)
+  console.log(`Git Graph ${result.version} compatibility ${result.changed ? 'patched' : 'validated'}: ${result.bundles.join(', ')}`)
 }

@@ -1,6 +1,6 @@
 # dsh-mathmodel-desktop — DeepSeek 数学建模版桌面端
 
-基于官方 `dsh-desktop` Electron 壳的**数学建模专属桌面发行版**：把内置的 DeepSeek Harness（`@deepseek-ai/dsh` `0.1.5-rc.3`）Web GUI 变成可安装的 Windows 桌面应用，内置独立 Node.js 运行时、dsh 宿主和预装好的数学建模 profile（官方 web bundle + dsh-web 插件全家桶 + **dsh-mathmodel 数学建模插件**），开箱即用——不需要预装 Node、npm 或 dsh CLI。
+基于官方 `dsh-desktop` Electron 壳的**通用编程 Harness 桌面发行版**；“数学建模版”是发行代号，并非用途限制。当前 0.1.3 源码内置官方 DeepSeek Harness（`@deepseek-ai/dsh` `0.2.0-rc.2`）、Web 插件家族 `0.4.5`、独立 Node.js 运行时与 **dsh-mathmodel 扩展**，不需要预装 Node、npm 或 dsh CLI。0.2.0-rc.2 是官方发布候选版本；历史已发布的桌面 0.1.2 内核仍为 0.1.5-rc.3。
 
 ## 数学建模能力（dsh-mathmodel 0.1.1）
 
@@ -10,7 +10,7 @@
 - 依赖预检（Python 科学计算包、XeLaTeX、latexmk、Draw.io、Poppler）
 - 视觉理解与受控生图（凭据 allowlist、付费确认、预算与数量上限、错误信息脱敏）
 - 图片转可编辑 PPT 专用生图链路（`editable_ppt_image`，Codex 后端防线）
-- 版本门失败关闭：`src/version.js` 白名单 `0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1 / 0.1.5-rc.2 / 0.1.5-rc.3`
+- 版本门失败关闭：`src/version.js` 白名单保留旧版，并加入 `0.2.0-rc.2`。
 
 配套数学建模 skills（`~/.dsh-mathmodel/skills/`，可通过链接共享实际技能库）：math-paper-cn、国赛摘要、单问深研求解、HTML 论文图、image-to-editable-ppt、ultramath 模型库等。
 
@@ -28,7 +28,7 @@
 | --- | --- |
 | `src/` | Electron 主进程（`main.cjs`）、可测试纯函数（`runtime.cjs`）、preload、启动页与错误页 |
 | `plugins/dsh-mathmodel/` | 精华数学建模插件源码（Host、Client、卡片注册、凭据、预检、视觉与生图） |
-| `runtime/host/` | 锁定 `@deepseek-ai/dsh@0.1.5-rc.3` 的宿主运行时载荷 |
+| `runtime/host/` | 锁定 `@deepseek-ai/dsh@0.2.0-rc.2` 的宿主运行时载荷 |
 | `runtime/profile-web/` | web profile 种子：`dsh-base` + `dsh-web-app` + `dsh-web-all` + `dsh-mathmodel`（`cordis.patch.yml` 接线：ui-skill 禁用，mathmodel/mathmodel-tools 插入） |
 | `scripts/` | Node/pnpm 下载校验（sha256）、运行时构建暂存、afterPack 载荷拷贝 |
 
@@ -54,11 +54,13 @@ Windows 解包产物可用 `npm run verify:win` 验证，也可用 `npm run veri
 
 ## 日常升级
 
-Windows 桌面版 0.1.2 已将 Harness 原有的左下角更新按钮接入桌面更新流程。发现新桌面版本时按钮突出显示，点击查看说明；确认后下载，下载校验完成后另行确认安装和重启。桌面端的这个按钮不再探测或运行 pnpm 更新；普通 CLI 和浏览器版保留各自原有行为。默认更新源尚无清单时，按钮不高亮，点击会提示“更新源尚未提供更新清单”。更新源在“桌面更新 → 更新设置”中配置，也可关闭启动时检查。
+Windows 桌面版 0.1.2 起将 Harness 原有的左下角更新按钮接入桌面更新流程。发现新桌面版本时按钮突出显示，点击查看说明；确认后自动下载，校验完成后另行确认安装和重启。桌面端的这个按钮不再执行 pnpm 更新。更新源在“桌面更新 → 更新设置”中配置，也可关闭启动时检查。
 
-新版本通过 HTTPS 下载并验证 SHA-256、文件大小、应用身份及版本。退出旧进程后切换完整应用目录；新版宿主、插件和 GUI 验证失败时自动恢复此前版本。菜单“恢复上一个版本”使用经校验的完整旧版，替代旧的运行时覆盖快照。
+0.1.3 的内核升级改变会话格式 V3→V4，因此默认清单对旧客户端先提供 0.1.3-bridge.1，再由升级准备版提供 0.1.3。程序自动完成两个步骤的下载、校验和安装，每步仍由你确认，无需手动解压或寻找官方包。格式升级前备份 home 和 Electron userData，启动失败恢复旧程序和旧数据；手动回滚先保留新版数据副本。发布与本机验证状态见[更新证据](docs/desktop-updates-verification.md)。以后新的官方内核仍需维护者适配、构建并发布新版桌面包，才会进入这个更新入口。
 
-旧 0.1.0 没有接入应用内更新。此前首次迁移使用当时的 `scripts/bootstrap-installed-desktop.mjs` 自动完成：核验 0.1.1 ZIP 和 NSIS 成品，备份个人数据，在原安装路径切换完整应用目录，保持桌面快捷方式目标不变；不运行可能删除个人数据的旧卸载器。隔离夹具的失败恢复和成功启动均已通过，本机原有个人安装已迁移至 0.1.1 并通过 GUI 健康检查，旧程序及个人数据备份保留。这是首次迁移的历史记录；当前引导脚本只接受旧 0.1.0 安装，目标已改为经验证的 0.1.2 成品。本机个人安装随后已通过完整目录切换升级至 0.1.2，启动健康检查和更新助手退出后的 GUI 存活均通过。0.1.2 修复包取代未发布的 0.1.1 候选包。用户无需手动解压 ZIP。线上仍需上传 0.1.2 的 `desktop-update.json` 和对应 Windows ZIP。
+新版本通过 HTTPS 下载并验证 SHA-256、文件大小、应用身份及版本。退出旧进程后切换完整应用目录；新版宿主、插件和 GUI 验证失败时自动恢复此前版本。菜单“恢复上一个版本”使用经校验的完整旧程序，跨会话格式时同步恢复匹配的数据快照。
+
+旧 0.1.0 没有接入应用内更新。此前首次迁移使用当时的 `scripts/bootstrap-installed-desktop.mjs` 自动完成：核验 0.1.1 ZIP 和 NSIS 成品，备份个人数据，在原安装路径切换完整应用目录，保持桌面快捷方式目标不变；不运行可能删除个人数据的旧卸载器。隔离夹具的失败恢复和成功启动均已通过，本机原有个人安装已迁移至 0.1.1 并通过 GUI 健康检查，旧程序及个人数据备份保留。这是首次迁移的历史记录；当前引导脚本只接受旧 0.1.0 安装，目标已改为经验证的 0.1.2 成品。本机个人安装随后已通过完整目录切换升级至 0.1.2，启动健康检查和更新助手退出后的 GUI 存活均通过。[v0.1.2 发行版](https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/tag/v0.1.2)已公开发布并取代未发布的 0.1.1 候选包；用户无需手动解压 ZIP。
 
 ```sh
 node scripts/update-kernel.mjs --check   # 只读取本地锁定的版本
@@ -66,7 +68,7 @@ node scripts/update-kernel.mjs --check   # 只读取本地锁定的版本
 
 维护者修改内核版本后，需回归插件版本门、重新构建和验证完整安装包，再发布这个桌面发行版。旧维护脚本的无参、`--auto`、`--plugins`、`--rollback` 已拒绝执行，避免未经验证地改写内核或个人配置。
 
-发布前可运行 `node scripts/publish-desktop-release.mjs --plan`，在本地校验 0.1.2 ZIP、NSIS、更新清单、校验表和发布说明；此模式不读取凭据，也不写入 GitHub。实际发布需先确认源码提交与远端 `v0.1.2` 标签一致，并获得公开发布授权。详见[发布验证](docs/desktop-updates-verification.md#发布边界)。
+已发布的 v0.1.2 对应源码提交 `7c1a31e89d1582b73bb8fa20f67e595c23b833d2`。维护者可运行 `node scripts/publish-desktop-release.mjs --plan`，在本地校验 ZIP、NSIS、更新清单、校验表和发布说明；此模式不读取凭据，也不写入 GitHub。详见[发布验证](docs/desktop-updates-verification.md#发布边界)。
 
 更新与回滚的实现和实测范围见 [桌面更新验证](docs/desktop-updates-verification.md)。
 

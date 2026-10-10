@@ -195,13 +195,18 @@ async function browserDraftPayload(file) {
 
 function currentInputState(input) {
   const state = input?.state?.getSnapshot?.();
-  if (!state || !Array.isArray(state.imageIds)) throw new Error('输入草稿已不可用，请重试');
+  if (!state || (!Array.isArray(state.imageIds) && !Array.isArray(state.attachmentIds))) throw new Error('输入草稿已不可用，请重试');
   return state;
 }
 
 function createManualVisionActions({ stage, workspaceOf, draftImages, releaseDraftImages, inputForSession, notify, encodeImage = browserDraftPayload }) {
   return {
     notify,
+    imageIdsForInput(input) {
+      if (Array.isArray(input?.imageIds)) return input.imageIds;
+      if (!Array.isArray(input?.attachmentIds)) return [];
+      return draftImages(input.attachmentIds).filter((attachment) => attachment.kind === 'image').map((attachment) => attachment.id);
+    },
     async stageToDraft({ sessionId, imageIds }) {
       if (!Array.isArray(imageIds) || imageIds.length === 0) throw new Error('请先添加至少一张图片');
       const workspace = workspaceOf(sessionId);
@@ -211,10 +216,13 @@ function createManualVisionActions({ stage, workspaceOf, draftImages, releaseDra
       if (attachments.length !== imageIds.length) throw new Error('图片草稿已变更，请重试');
       const result = await stage(await Promise.all(attachments.map((attachment) => encodeImage(attachment.file))), workspace);
       const latest = currentInputState(input);
-      const liveImageIds = new Set(latest.imageIds);
+      const liveImageIds = new Set(latest.imageIds ?? latest.attachmentIds);
       if (!imageIds.every((id) => liveImageIds.has(id))) throw new Error('图片草稿已变更，未写入附图结果');
       input.setDraft(appendStagedImagesDraft(latest.draft, result?.files));
-      for (const id of imageIds) input.removeImage(id);
+      for (const id of imageIds) {
+        if (typeof input.removeAttachment === 'function') input.removeAttachment(id);
+        else input.removeImage(id);
+      }
       releaseDraftImages(attachments);
       input.notify?.('info', `已附图 ${result.files.length} 张；发送后模型将调用视觉工具查看原图。`);
       return result;
@@ -921,7 +929,7 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
 
       function ManualVisionDraftButton({ input, sessionId, actions }) {
         const [busy, setBusy] = React.useState(false);
-        const imageIds = input?.imageIds ?? [];
+        const imageIds = actions.imageIdsForInput(input);
         if (imageIds.length === 0) return null;
         const stage = async () => {
           setBusy(true);
@@ -978,7 +986,7 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         'conversation',
       ];
       const pass = Object.freeze({ parse: (value) => value });
-      const codec = Object.freeze({ mode: 'strict', typeSymbol: 'mathmodel#json', schema: pass });
+      const codec = Object.freeze({ mode: 'strict', typeSymbol: 'mathmodel#json', schema: pass, create: () => pass });
       const param = (name) => ({ name, wire: name, source: 'json', codec });
       const descriptor = (service, method, parameters = []) => ({
         id: `@deepseek-harness/dsh-mathmodel#${service}/${method}`,
@@ -1102,8 +1110,10 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         const manualVisionActions = createManualVisionActions({
           stage: (images, workspace) => unwrapRemote(mathmodelManualVision.stage(images, workspace), 'mathmodelManualVision/stage'),
           workspaceOf: (sessionId) => sessions.list?.getSnapshot?.().byId[sessionId]?.cwd,
-          draftImages: (imageIds) => conversation.draftImages(imageIds),
-          releaseDraftImages: (attachments) => conversation.releaseDraftImages(attachments),
+          draftImages: (imageIds) => typeof conversation.resolveDraftAttachments === 'function'
+            ? conversation.resolveDraftAttachments(imageIds) : conversation.draftImages(imageIds),
+          releaseDraftImages: (attachments) => typeof conversation.releaseDraftAttachments === 'function'
+            ? conversation.releaseDraftAttachments(attachments) : conversation.releaseDraftImages(attachments),
           inputForSession: (sessionId) => {
             const actx = sessions.scope(sessionId);
             if (!actx) throw new Error('当前会话已不可用，请重试');

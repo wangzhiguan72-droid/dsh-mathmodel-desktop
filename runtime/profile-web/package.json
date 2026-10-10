@@ -4,14 +4,13 @@
   "description": "Preinstalled web profile seed for the mathmodel desktop app: the official web bundles, the dsh-web plugin collection, and the dsh-mathmodel math-modeling plugin.",
   "dependencies": {
     "@deepseek-harness/dsh-mathmodel": "file:..\\..\\plugins\\dsh-mathmodel",
-    "@linxin666/dsh-web-all": "0.3.23"
+    "@linxin666/dsh-web-all": "0.4.5"
   },
   "pnpm": {
     "overrides": {
-      "@deepseek-ai/cordis": "4.0.2",
-      "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
-      "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2",
-      "dsh-better-sidebar": "0.19.1"
+      "@deepseek-ai/cordis": "4.0.4",
+      "@deepseek-ai/schemastery": "3.18.4",
+      "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2"
     }
   },
   "dsh": {

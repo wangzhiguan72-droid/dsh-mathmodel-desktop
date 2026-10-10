@@ -54,7 +54,15 @@ function createContext() {
   };
   const ctx = {
     remote: {
-      async $mount(manifest) { calls.push('mount'); assert.equal(manifest.descriptors.length, 20); return async () => calls.push('dispose'); },
+      async $mount(manifest) {
+        calls.push('mount');
+        assert.equal(manifest.descriptors.length, 20);
+        for (const descriptor of manifest.descriptors) {
+          assert.equal(descriptor.result.create().parse('result'), 'result');
+          for (const parameter of descriptor.parameters) assert.equal(typeof parameter.codec.create().parse, 'function');
+        }
+        return async () => calls.push('dispose');
+      },
       $on(name, handler) { events.set(name, handler); },
     },
     get(name) {

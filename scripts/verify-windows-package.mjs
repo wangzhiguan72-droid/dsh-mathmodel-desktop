@@ -240,10 +240,9 @@ async function start(appDir, phase) {
   const { children } = await rowsResponse.json();
   const expectedRows = [
     'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
-    'dsh-client-ui-community-plugins', 'dsh-client-ui-market',
-    'dsh-client-ui-task-board', 'dsh-client-ui-git-graph', 'dsh-remote-web-ui',
-    'dsh-pet', 'dsh-usage', 'dsh-session-archive',
-    'dsh-client-ui-model-capabilities', 'dsh-client-ui-preset-center', 'dsh-client-ui-skin-center',
+    'dsh-client-ui-market', 'dsh-client-ui-task-board', 'dsh-client-ui-task-board-github',
+    'dsh-client-ui-git-graph', 'dsh-remote-web-ui', 'dsh-update',
+    'dsh-usage', 'dsh-session-archive', 'dsh-client-ui-model-capabilities',
   ].map(name => '@linxin666/' + name);
   assert.deepEqual([...children].sort(), expectedRows.sort(), 'Full profile default family rows changed.');
   const marker = JSON.parse(fs.readFileSync(markerFile, 'utf8'));

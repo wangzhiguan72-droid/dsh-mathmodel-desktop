@@ -1,4 +1,8 @@
 import Schema from '@deepseek-ai/schemastery';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import YAML from 'yaml';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { CardRegistry, SkillHelpCatalog } from './cards/registry.js';
 import { MathModelCardsRemote } from './cards/remote.js';
@@ -58,6 +62,94 @@ export const ImageConnectionsSchema = Schema.object({
   activeConnectionId: '',
   connections: [],
 });
+
+// Current Harness settings are the volatile part of a Loader plugin Config.
+// Keep the three historical sections inside this one plugin entry so edits
+// persist through SettingsForms and the normal profile patch/reload path.
+export const Config = Schema.object({
+  skillRoot: Schema.string(),
+  providers: ProviderSettingsSchema.volatile(),
+  imageConnections: ImageConnectionsSchema.volatile(),
+  openCodeRt: OpenCodeRtSettingsSchema.volatile(),
+  legacySettingsMigrated: Schema.boolean().default(false).volatile(),
+});
+
+function currentSettings(ctx, config, migration) {
+  const settings = ctx.settings;
+  const entry = () => settings.describe().find((row) => row.ns === 'mathmodel');
+  const ready = () => {
+    if (migration.error) throw migration.error;
+    if (migration.pending) throw new Error('Mathmodel settings migration is still in progress');
+  };
+  const scope = (field, fallback) => {
+    const get = () => { ready(); return entry()?.value?.[field] ?? config[field] ?? fallback; };
+    return {
+      get,
+      update: async (patch) => settings.update('mathmodel', { [field]: { ...get(), ...patch } }),
+      replace: async (value) => { ready(); return settings.update('mathmodel', { [field]: value }); },
+    };
+  };
+  const providers = scope('providers', DEFAULT_PROVIDER_SETTINGS);
+  const imageConnections = scope('imageConnections', {
+    schema: IMAGE_CONNECTIONS_SCHEMA_TAG, activeConnectionId: '', connections: [],
+  });
+  const all = {
+    get(ns) {
+      if (ns === 'mathmodel-opencode-rt') {
+        ready();
+        return entry()?.value?.openCodeRt ?? config.openCodeRt ?? { verifiedVisionModels: [] };
+      }
+      return settings.describe().find((row) => row.ns === ns)?.value;
+    },
+    update(ns, patch) {
+      if (ns === 'mathmodel-opencode-rt') {
+        ready();
+        return settings.update('mathmodel', { openCodeRt: { ...this.get(ns), ...patch } });
+      }
+      return settings.update(ns, patch);
+    },
+    mutate: (...args) => settings.mutate(...args),
+  };
+  return { providers, imageConnections, all, entry };
+}
+
+async function migrateLegacySettings(ctx, entry) {
+  const home = ctx.get('profileContext')?.home;
+  if (!home) throw new Error('Mathmodel settings migration requires profile home');
+  const original = join(home, 'settings.yaml');
+  const imported = `${original}.imported`;
+  const legacyPresent = existsSync(original) || existsSync(imported);
+  if (!legacyPresent) return;
+  await ctx.root.loader.await();
+  // SettingsForms renames the old document to .imported. Read either name:
+  // this migration can be scheduled before or after its import finishes.
+  let old;
+  for (let attempt = 0; attempt < 100 && old === undefined; attempt++) {
+    for (const file of [original, imported]) {
+      try { old = YAML.parse(await readFile(file, 'utf8')); break; }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (old === undefined) await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (old === undefined) throw new Error('Legacy mathmodel settings disappeared during import');
+  if (old == null) return;
+  if (typeof old !== 'object' || Array.isArray(old)) throw new Error('Legacy mathmodel settings must be a mapping');
+  const fields = [
+    [PROVIDER_SETTINGS_NAMESPACE, 'providers', (value) => new ProviderSettingsFacade({ get: () => value }).describe()],
+    [IMAGE_CONNECTIONS_NAMESPACE, 'imageConnections', validateImageConnections],
+    ['mathmodel-opencode-rt', 'openCodeRt', (value) => OpenCodeRtSettingsSchema(value)],
+  ];
+  const descriptor = entry();
+  if (!descriptor) throw new Error('Mathmodel Config entry is unavailable during settings migration');
+  if (descriptor.value?.legacySettingsMigrated) return;
+  const patch = {};
+  for (const [legacy, field, validate] of fields) {
+    if (!Object.hasOwn(old, legacy) || descriptor.user?.[field] !== undefined) continue;
+    patch[field] = validate(old[legacy]);
+  }
+  if (!fields.some(([name]) => Object.hasOwn(old, name))) return;
+  await ctx.settings.update('mathmodel', { ...patch, legacySettingsMigrated: true });
+}
 
 const REMOTE_INITIALIZERS = new WeakMap();
 
@@ -187,15 +279,34 @@ remote(MathmodelManualVisionGateway, 'stage');
 
 export function installMathmodelHost(ctx, config = {}) {
   const skillRoot = config.skillRoot;
-  const settingsScope = ctx.settings.register(PROVIDER_SETTINGS_NAMESPACE, ProviderSettingsSchema, {
-    applies: 'live',
-    validate: (value) => new ProviderSettingsFacade({ get: () => value }).describe(),
-  });
-  const imageConnectionsScope = ctx.settings.register(IMAGE_CONNECTIONS_NAMESPACE, ImageConnectionsSchema, {
-    applies: 'live',
-    validate: (value) => { validateImageConnections(value); },
-  });
-  ctx.settings.register('mathmodel-opencode-rt', OpenCodeRtSettingsSchema, { applies: 'live' });
+  let settingsScope, imageConnectionsScope, settings, hasV2UserSection;
+  if (typeof ctx.settings.register === 'function') {
+    settingsScope = ctx.settings.register(PROVIDER_SETTINGS_NAMESPACE, ProviderSettingsSchema, {
+      applies: 'live',
+      validate: (value) => new ProviderSettingsFacade({ get: () => value }).describe(),
+    });
+    imageConnectionsScope = ctx.settings.register(IMAGE_CONNECTIONS_NAMESPACE, ImageConnectionsSchema, {
+      applies: 'live',
+      validate: (value) => { validateImageConnections(value); },
+    });
+    ctx.settings.register('mathmodel-opencode-rt', OpenCodeRtSettingsSchema, { applies: 'live' });
+    settings = ctx.settings;
+    hasV2UserSection = () => ctx.settings.describe({ redactSecrets: true })
+      .find((entry) => entry.ns === IMAGE_CONNECTIONS_NAMESPACE)?.user !== undefined;
+  } else {
+    const home = ctx.get('profileContext')?.home;
+    const migration = { pending: Boolean(home && (existsSync(join(home, 'settings.yaml'))
+      || existsSync(join(home, 'settings.yaml.imported')))), error: null };
+    const current = currentSettings(ctx, config, migration);
+    ({ providers: settingsScope, imageConnections: imageConnectionsScope, all: settings } = current);
+    hasV2UserSection = () => current.entry()?.user?.imageConnections !== undefined;
+    // The legacy document is kept by SettingsForms as .imported; a migration
+    // failure is surfaced in the host log and never deletes that source.
+    void migrateLegacySettings(ctx, current.entry).then(() => { migration.pending = false; }, (error) => {
+      migration.error = error;
+      ctx.logger.error(error);
+    });
+  }
   const credentials = new CredentialFacade(ctx.credentials);
   const cards = new MathModelCardsRemote(new CardRegistry(skillRoot), new SkillHelpCatalog(skillRoot));
   const preflight = new PreflightService();
@@ -206,21 +317,14 @@ export function installMathmodelHost(ctx, config = {}) {
     credentialStore,
     credentialProvider: ctx.credentials,
     subscriptionSessions: () => ctx.get('subscriptionSessions'),
-    hasV2UserSection: () => {
-      try {
-        const descriptor = ctx.settings.describe({ redactSecrets: true }).find((entry) => entry.ns === IMAGE_CONNECTIONS_NAMESPACE);
-        return descriptor?.user !== undefined;
-      } catch {
-        return false;
-      }
-    },
+    hasV2UserSection,
   });
   const runtime = Object.freeze({
     vision: new VisionService({ credentials: ctx.credentials }),
     image: new ImageGenerationService({ connections: imageConnections }),
   });
-  const openCodeRt = new OpenCodeRtService({ settings: ctx.settings, credentials: ctx.credentials });
-  const storedKeyModelDiscovery = new StoredKeyModelDiscoveryService({ settings: ctx.settings, credentials: ctx.credentials });
+  const openCodeRt = new OpenCodeRtService({ settings, credentials: ctx.credentials });
+  const storedKeyModelDiscovery = new StoredKeyModelDiscoveryService({ settings, credentials: ctx.credentials });
 
   ctx.effect(() => ctx.reflect.provide('mathmodelRuntime', runtime), 'dsh-mathmodel: runtime');
   new MathmodelCardsGateway(ctx, cards);
