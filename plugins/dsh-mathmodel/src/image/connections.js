@@ -1,4 +1,3 @@
-import { safeError } from '../security/redact.js';
 import {
   IMAGE_CONNECTIONS_SCHEMA_TAG, MAX_CONNECTIONS, capabilityOf, fail, generateConnectionId,
   isValidConnectionId, migrateFromV1, validateConnectionDraft, validateImageConnections,
@@ -11,6 +10,14 @@ import { assertNotCodex, capabilitiesForProtocol } from './capabilities.js';
 const LEGACY_CREDENTIAL_REFS = new Set(['DASHSCOPE_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'CUSTOM_IMAGE_API_KEY']);
 const CODEX_TEMPLATE_ID = 'codex-subscription';
 const GROK_TEMPLATE_ID = 'grok-subscription';
+const trustedModelErrors = new WeakSet();
+const credentialProviderFailure = () => new Error('生图凭据服务操作失败');
+
+function modelFailure(code, message) {
+  const error = fail(code, message);
+  trustedModelErrors.add(error);
+  return error;
+}
 
 function withoutVerification(connection) {
   const { verification: _ignored, ...rest } = connection;
@@ -18,7 +25,7 @@ function withoutVerification(connection) {
 }
 
 function parseModels(payload) {
-  if (!Array.isArray(payload?.data)) throw fail('invalid_models_response', '模型列表接口未返回 data 数组；请手动填写模型');
+  if (!Array.isArray(payload?.data)) throw modelFailure('invalid_models_response', '模型列表接口未返回 data 数组；请手动填写模型');
   const seen = new Set();
   const models = [];
   for (const entry of payload.data) {
@@ -85,7 +92,7 @@ export class ImageConnectionService {
     const current = this.settings.get();
     if (current?.schema === IMAGE_CONNECTIONS_SCHEMA_TAG && this.hasV2UserSection()) return current;
     let v1 = {};
-    try { v1 = this.legacySettings?.get?.() ?? {}; } catch { v1 = {}; }
+    try { v1 = this.legacySettings?.get?.() ?? {}; } catch { throw new Error('旧生图配置读取失败'); }
     const states = {};
     for (const ref of LEGACY_CREDENTIAL_REFS) {
       try { states[ref] = (await this.credentialProvider.describe(ref))?.configured === true; } catch { states[ref] = false; }
@@ -110,7 +117,12 @@ export class ImageConnectionService {
     if (connection.template === CODEX_TEMPLATE_ID) return await describeCodexCredential(this.subscriptionSessions);
     if (connection.template === GROK_TEMPLATE_ID) return await describeGrokCredential(this.subscriptionSessions);
     if (LEGACY_CREDENTIAL_REFS.has(connection.credentialRef)) {
-      const info = await this.credentialProvider.describe(connection.credentialRef);
+      let info;
+      try {
+        info = await this.credentialProvider.describe(connection.credentialRef);
+      } catch {
+        throw credentialProviderFailure();
+      }
       return Object.freeze({
         ref: connection.credentialRef,
         configured: info?.configured === true,
@@ -131,7 +143,12 @@ export class ImageConnectionService {
       return { ref: 'subscriptions-auth', value: JSON.stringify({ access: session.accessToken }), source: 'subscriptions-auth' };
     }
     if (LEGACY_CREDENTIAL_REFS.has(connection.credentialRef)) {
-      const info = await this.credentialProvider.resolve(connection.credentialRef);
+      let info;
+      try {
+        info = await this.credentialProvider.resolve(connection.credentialRef);
+      } catch {
+        throw credentialProviderFailure();
+      }
       return { ref: connection.credentialRef, value: typeof info?.value === 'string' ? info.value : '', source: typeof info?.source === 'string' ? info.source : 'managed' };
     }
     return await this.credentialStore.resolve(connection.id);
@@ -146,7 +163,11 @@ export class ImageConnectionService {
     }
     if (typeof value !== 'string' || !value.trim()) throw fail('invalid_key', 'API Key 不能为空');
     if (LEGACY_CREDENTIAL_REFS.has(connection.credentialRef)) {
-      await this.credentialProvider.set(connection.credentialRef, value);
+      try {
+        await this.credentialProvider.set(connection.credentialRef, value);
+      } catch {
+        throw credentialProviderFailure();
+      }
     } else {
       await this.credentialStore.set(connection.id, value);
     }
@@ -161,7 +182,11 @@ export class ImageConnectionService {
       throw fail('subscription_credential_managed', 'Grok 订阅连接的凭据由订阅登录管理；如需移除请到“设置 → 订阅”登出 Grok');
     }
     if (LEGACY_CREDENTIAL_REFS.has(connection.credentialRef)) {
-      await this.credentialProvider.unset(connection.credentialRef);
+      try {
+        await this.credentialProvider.unset(connection.credentialRef);
+      } catch {
+        throw credentialProviderFailure();
+      }
     } else {
       await this.credentialStore.clear(id);
     }
@@ -282,18 +307,23 @@ export class ImageConnectionService {
       let token = '';
       try { token = JSON.parse(credential.value)?.access ?? ''; } catch { /* 快照解析失败按未配置处理 */ }
       if (!token) throw fail('credential_missing', '尚未登录 Grok 订阅；请到“设置 → 订阅”完成 Grok 登录');
-      const response = await this.fetch(`${connection.baseUrl}/models`, {
-        method: 'GET',
-        headers: { accept: 'application/json', authorization: `Bearer ${token}` },
-      });
-      if (!response?.ok) {
-        const status = response?.status ?? '未知';
-        if (status === 401 || status === 403) throw fail('models_endpoint_rejected', `模型列表接口拒绝了请求（HTTP ${status}）；模型仍可手动填写，且这不等同于生图不可用`);
-        throw fail('models_http_error', `模型列表接口请求失败（HTTP ${status}）`);
+      try {
+        const response = await this.fetch(`${connection.baseUrl}/models`, {
+          method: 'GET',
+          headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+        });
+        if (!response?.ok) {
+          const status = Number.isInteger(response?.status) && response.status >= 100 && response.status <= 599 ? response.status : '未知';
+          if (status === 401 || status === 403) throw modelFailure('models_endpoint_rejected', `模型列表接口拒绝了请求（HTTP ${status}）；模型仍可手动填写，且这不等同于生图不可用`);
+          throw modelFailure('models_http_error', `模型列表接口请求失败（HTTP ${status}）`);
+        }
+        const models = parseModels(await response.json())
+          .filter((entry) => /imagine-image/.test(entry.id));
+        return Object.freeze({ connectionId: id, models: Object.freeze(models) });
+      } catch (error) {
+        if (trustedModelErrors.has(error)) throw error;
+        throw new Error('模型列表请求失败');
       }
-      const models = parseModels(await response.json())
-        .filter((entry) => /imagine-image/.test(entry.id));
-      return Object.freeze({ connectionId: id, models: Object.freeze(models) });
     }
     const credential = await this.resolveCredential(connection);
     if (!credential.value) throw fail('credential_missing', '该连接尚未保存 API Key；请先保存后再获取模型');
@@ -304,15 +334,14 @@ export class ImageConnectionService {
         headers: { accept: 'application/json', authorization: `Bearer ${credential.value}` },
       });
       if (!response?.ok) {
-        const status = response?.status ?? '未知';
-        if (status === 401 || status === 403) throw fail('models_endpoint_rejected', `模型列表接口拒绝了请求（HTTP ${status}）；模型仍可手动填写，且这不等同于生图不可用`);
-        throw fail('models_http_error', `模型列表接口请求失败（HTTP ${status}）`);
+        const status = Number.isInteger(response?.status) && response.status >= 100 && response.status <= 599 ? response.status : '未知';
+        if (status === 401 || status === 403) throw modelFailure('models_endpoint_rejected', `模型列表接口拒绝了请求（HTTP ${status}）；模型仍可手动填写，且这不等同于生图不可用`);
+        throw modelFailure('models_http_error', `模型列表接口请求失败（HTTP ${status}）`);
       }
       return Object.freeze({ connectionId: id, models: parseModels(await response.json()) });
     } catch (error) {
-      if (error?.code) throw error;
-      const cleaned = safeError(error, [credential.value]);
-      throw cleaned;
+      if (trustedModelErrors.has(error)) throw error;
+      throw new Error('模型列表请求失败');
     }
   }
 
@@ -375,10 +404,30 @@ export class ImageConnectionService {
       activeConnectionId: value.activeConnectionId === id ? '' : value.activeConnectionId,
       connections: value.connections.filter((item) => item.id !== id),
     };
-    await this.settings.replace(validateImageConnections(next));
+    const validated = validateImageConnections(next);
     if (clearCredential === true) {
-      if (LEGACY_CREDENTIAL_REFS.has(removed.credentialRef)) await this.credentialProvider.unset(removed.credentialRef);
-      else await this.credentialStore.clear(id);
+      if (LEGACY_CREDENTIAL_REFS.has(removed.credentialRef)) {
+        try {
+          await this.credentialProvider.unset(removed.credentialRef);
+        } catch {
+          throw credentialProviderFailure();
+        }
+      } else {
+        try {
+          await this.credentialStore.clear(id);
+        } catch {
+          throw credentialProviderFailure();
+        }
+      }
+    }
+    if (clearCredential === true) {
+      try {
+        await this.settings.replace(validated);
+      } catch {
+        throw new Error('生图连接设置保存失败');
+      }
+    } else {
+      await this.settings.replace(validated);
     }
     return await this.list();
   }

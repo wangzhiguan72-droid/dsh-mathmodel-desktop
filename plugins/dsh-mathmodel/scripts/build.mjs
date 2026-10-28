@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const brandIcon = await readFile(resolve(root, '../../MetaMath-Harness.ico'), 'base64');
+const brandIcon = await readFile(resolve(root, '../../src/assets/MetaMath-Harness.ico'), 'base64');
 const heroTitle = await readFile(resolve(root, 'src/assets/metamath-hero-title.png'), 'base64');
 const files = [
   ['src/index.js', 'lib/index.js'],
@@ -36,6 +36,10 @@ const files = [
   ['src/image/service.js', 'lib/image/service.js'],
   ['src/tool-contracts.js', 'lib/tool-contracts.js'],
   ['src/tools.js', 'lib/tools.js'],
+  ['src/capabilities.js', 'lib/capabilities.js'],
+  ['src/host-capabilities.js', 'lib/host-capabilities.js'],
+  ['src/task-tool-switches.js', 'lib/task-tool-switches.js'],
+  ['src/host-freeze-policy.js', 'lib/host-freeze-policy.js'],
   ['types/index.d.ts', 'lib/types/index.d.ts'],
   ['types/client.d.ts', 'lib/types/client.d.ts'],
   ['types/tools.d.ts', 'lib/types/tools.d.ts'],

@@ -1,0 +1,5 @@
+{
+  "appId": "com.deepseek.harness.mathmodel",
+  "feedUrl": "https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/latest/download/desktop-update.json",
+  "autoCheck": true
+}

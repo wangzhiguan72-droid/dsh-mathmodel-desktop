@@ -1,0 +1,38 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "description": "Preinstalled web profile seed for the mathmodel desktop app: the official web bundles, the dsh-web plugin collection, and the dsh-mathmodel math-modeling plugin.",
+  "dependencies": {
+    "@deepseek-harness/dsh-mathmodel": "file:..\\..\\plugins\\dsh-mathmodel",
+    "dsh-model-fusion": "file:..\\..\\plugins\\dsh-model-fusion",
+    "@nanmicoder/dsh-auto-mode": "file:..\\..\\plugins\\dsh-auto-mode",
+    "@nanmicoder/dsh-agent-teams": "file:..\\..\\plugins\\dsh-agent-teams",
+    "dsh-context": "0.78.0",
+    "@linxin666/dsh-web-all": "0.4.11",
+    "@dsh-external/dsh-better-browser": "file:../../plugins/dsh-better-browser",
+    "@deepseek-ai/dsh-hooks-claude-code": "0.2.1-rc.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "@deepseek-ai/cordis": "4.0.5",
+      "@deepseek-ai/schemastery": "3.18.5",
+      "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.4"
+    }
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@linxin666/dsh-web-all",
+        "dsh-model-fusion",
+        "@deepseek-ai/dsh-experimental-auto-review",
+        "@nanmicoder/dsh-auto-mode",
+        "@dsh-external/dsh-better-browser",
+        "dsh-context",
+        "@nanmicoder/dsh-agent-teams"
+      ],
+      "patchReload": "live"
+    }
+  }
+}

@@ -6,13 +6,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-SKILL = ROOT / ".dsh" / "skills" / "math-paper-cn"
+
+
+def environment_path(name: str, default: Path) -> Path:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    if value == "~":
+        return Path.home()
+    if value.startswith(("~/", "~\\")):
+        return Path.home() / value[2:]
+    return Path(value).resolve()
+
+
+DSH_HOME = environment_path("DSH_HOME", Path.home() / ".dsh-mathmodel")
+SKILL = environment_path("DSH_SKILL_ROOT", DSH_HOME / "skills") / "math-paper-cn"
 EVIDENCE = ROOT / "Overall-goal" / "goal-1" / "evidence" / "task-021"
 PROJECT = EVIDENCE / "project"
 PAPER = PROJECT / "论文"

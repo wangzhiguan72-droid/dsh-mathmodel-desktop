@@ -1,0 +1,6 @@
+{
+  "provenance": "Vendored prebuilt dsh-model-fusion 0.2.8 copied from upstream main (_upstream-20261028/dsh-model-fusion). The upstream build script and toolchain are absent here; these hashes seal the current src and lib trees but do not prove that lib was compiled from src.",
+  "sourceSha256": "e0301003a5b5ccf1e931314921cfee402cfa0e0cb03ba2fe809f53e86e36fd20",
+  "libSha256": "de8ee3d56c6473da9637dd8e1270562d60dba5a30f6aae2df268a51cb6fc0a7d",
+  "compatibilityPatch": "2026-10-28 desktop client-scope fix re-applied on upstream 0.2.8 (swap-fusion.mjs): client inject and modelDirectories scope declare sessions/remote/remote.session; reviewed vendor output, not upstream full source build"
+}

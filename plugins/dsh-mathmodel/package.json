@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-harness/dsh-mathmodel",
   "version": "0.1.1",
-  "description": "DeepSeek Harness 0.1.1-rc.2 专用数学建模模式插件",
+  "description": "DeepSeek Harness 数学建模插件（含 0.2.1-rc.4 适配）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -17,6 +17,9 @@
     "./tools": {
       "types": "./lib/types/tools.d.ts",
       "default": "./lib/tools.js"
+    },
+    "./capabilities": {
+      "default": "./lib/capabilities.js"
     },
     "./typert": {
       "default": "./lib/typert.host.js"
@@ -34,7 +37,7 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-modules",
         "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-api-remotes"
@@ -45,15 +48,14 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-invariants": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.1-rc.2",
-    "@deepseek-ai/schemastery": "3.18.1",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.4",
+    "@deepseek-ai/schemastery": "3.18.5",
     "yaml": "^2.8.1",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh": "0.1.1-rc.2"
+    "@deepseek-ai/dsh": "0.1.1-rc.2 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.2.0-rc.2 || 0.2.1-alpha.4 || 0.2.1-rc.2 || 0.2.1-rc.4"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh": {
@@ -63,9 +65,13 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "e2e:paper": "python scripts/run-paper-e2e.py",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "test:environment": "npm run build && node --test test/preflight.environment.mjs",
-    "check": "node --check src/index.js && node --check src/host.js && node --check src/typert-shared.js && node --check src/typert.host.js && node --check src/typert.remote-client.js && node --check src/client-bundle.cjs && node --check src/tools.js && node --check src/version.js && node --check src/cards/schema.js && node --check src/cards/registry.js && node --check src/cards/prompt.js && node --check src/cards/remote.js && node --check src/preflight.js && node --check src/security/redact.js && node --check src/security/credentials.js && node --check src/security/provider-settings.js && node --check src/security/image-connections.js && node --check src/security/image-credentials.js && node --check src/vision.js && node --check src/opencode-rt.js && node --check src/model-discovery.js && node --check src/image/adapters.js && node --check src/image/assets.js && node --check src/image/capabilities.js && node --check src/image/codex-auth.js && node --check src/image/grok-auth.js && node --check src/image/verify.js && node --check src/image/connections.js && node --check src/image/service.js && node --check src/tool-contracts.js"
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "test:environment": "npm run test:harness && npm run test:skills && node --test test/preflight.environment.mjs",
+    "check": "node --check src/index.js && node --check src/host.js && node --check src/typert-shared.js && node --check src/typert.host.js && node --check src/typert.remote-client.js && node --check src/client-bundle.cjs && node --check src/tools.js && node --check src/version.js && node --check src/cards/schema.js && node --check src/cards/registry.js && node --check src/cards/prompt.js && node --check src/cards/remote.js && node --check src/preflight.js && node --check src/security/redact.js && node --check src/security/credentials.js && node --check src/security/provider-settings.js && node --check src/security/image-connections.js && node --check src/security/image-credentials.js && node --check src/vision.js && node --check src/opencode-rt.js && node --check src/model-discovery.js && node --check src/image/adapters.js && node --check src/image/assets.js && node --check src/image/capabilities.js && node --check src/image/codex-auth.js && node --check src/image/grok-auth.js && node --check src/image/verify.js && node --check src/image/connections.js && node --check src/image/service.js && node --check src/tool-contracts.js",
+    "test:skills": "npm run build && node --test \"test/environment/skills/*.test.mjs\"",
+    "test:harness": "npm run build && node --test \"test/environment/harness*.test.mjs\" \"test/environment/profile.test.mjs\"",
+    "test:legacy": "npm run build && node --test \"test/environment/legacy/*.test.mjs\"",
+    "test:e2e:editable-ppt": "npm run build && node --test \"test/environment/e2e/*.test.mjs\""
   },
   "license": "MIT",
   "private": true

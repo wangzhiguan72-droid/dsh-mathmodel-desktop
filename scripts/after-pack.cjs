@@ -14,6 +14,14 @@ const path = require('node:path');
 
 const stagingRoot = path.join(__dirname, '..', 'resources', 'runtime');
 
+function configureArchiveFilter(platform) {
+  // Current 7z auto-selects ARM64 BCJ for bundled cross-platform helpers.
+  // Use the legacy-compatible BCJ codec for Windows installer payloads.
+  if (platform === 'win32' && !process.env.ELECTRON_BUILDER_7Z_FILTER) {
+    process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
+  }
+}
+
 // builder-util's Arch enum: ia32=0, x64=1, armv7l=2, arm64=3, universal=4.
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
 const OS_NAMES = { darwin: 'mac', win32: 'win', linux: 'linux' };
@@ -40,7 +48,7 @@ function assertDestFile(file) {
   }
 }
 
-exports.default = async function afterPack(context) {
+async function copyStagedRuntime(context, sourceRoot, fusionPluginDir, fusionLockFile) {
   const os = OS_NAMES[context.electronPlatformName];
   const cpu = ARCH_NAMES[context.arch];
   if (os === undefined || cpu === undefined) {
@@ -49,12 +57,21 @@ exports.default = async function afterPack(context) {
   const root = resourcesDir(context);
   const runtimeRoot = path.join(root, 'runtime');
 
-  copyPayload(path.join(stagingRoot, 'host'), path.join(runtimeRoot, 'host'));
-  copyPayload(path.join(stagingRoot, 'profile-web'), path.join(runtimeRoot, 'profile-web'));
-  copyPayload(path.join(stagingRoot, `node-${os}-${cpu}`), path.join(runtimeRoot, 'node'));
+  // electron-builder can be invoked directly with an old resources tree.
+  // Refuse it before copyPayload mutates the packaged output.
+  const { verifyStagedFusion } = await import('./build-runtime.mjs');
+  verifyStagedFusion(path.join(sourceRoot, 'profile-web'), fusionPluginDir, fusionLockFile);
+  configureArchiveFilter(context.electronPlatformName);
+
+  copyPayload(path.join(sourceRoot, 'host'), path.join(runtimeRoot, 'host'));
+  copyPayload(path.join(sourceRoot, 'profile-web'), path.join(runtimeRoot, 'profile-web'));
+  copyPayload(path.join(sourceRoot, `node-${os}-${cpu}`), path.join(runtimeRoot, 'node'));
   // The reseed contract compares the seeded profile's stamp against this file;
   // without it a packaged app would never reseed after a runtime bump.
-  copyPayload(path.join(stagingRoot, 'VERSION.json'), path.join(runtimeRoot, 'VERSION.json'));
+  copyPayload(path.join(sourceRoot, 'VERSION.json'), path.join(runtimeRoot, 'VERSION.json'));
+  if (os === 'win' && fs.existsSync(path.join(sourceRoot, 'kimi-webbridge', 'kimi-webbridge.exe'))) {
+    copyPayload(path.join(sourceRoot, 'kimi-webbridge'), path.join(runtimeRoot, 'kimi-webbridge'));
+  }
 
   assertDestFile(path.join(runtimeRoot, 'node', os === 'win' ? 'node.exe' : path.join('bin', 'node')));
   // The bundled toolchain (npm from the official distribution, pnpm staged by
@@ -70,4 +87,15 @@ exports.default = async function afterPack(context) {
   const cloudflared = path.join(runtimeRoot, 'profile-web', 'node_modules', 'cloudflared', 'bin', 'cloudflared.exe');
   if (!fs.existsSync(cloudflared)) console.log(`[after-pack] WARNING: ${path.relative(path.join(__dirname, '..'), cloudflared)} missing (optional, remote tunnel only)`);
   console.log(`[after-pack] runtime payload staged into ${path.relative(path.join(__dirname, '..'), runtimeRoot)} (${os}-${cpu})`);
+}
+
+exports.copyStagedRuntime = copyStagedRuntime;
+exports.configureArchiveFilter = configureArchiveFilter;
+exports.default = async context => {
+  const { verifyStagedSandboxAuto } = await import('./stage-sandbox-auto.mjs');
+  verifyStagedSandboxAuto(path.join(stagingRoot, 'profile-web'), path.join(__dirname, '..', 'plugins', 'dsh-auto-mode'));
+  const { verifyStagedKimiBrowser } = await import('./stage-kimi-browser.mjs');
+  verifyStagedKimiBrowser(path.join(stagingRoot, 'profile-web'), path.join(__dirname, '..', 'plugins', 'dsh-better-browser'));
+  assertDestFile(path.join(stagingRoot, 'kimi-webbridge', 'kimi-webbridge.exe'));
+  return copyStagedRuntime(context, stagingRoot, path.join(__dirname, '..', 'plugins', 'dsh-model-fusion'));
 };

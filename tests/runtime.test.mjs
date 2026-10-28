@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -13,18 +14,54 @@ const {
   DESKTOP_PORT_SPAN,
   resolveRuntimePaths,
   resolveDshHome,
+  resolveProfileName,
+  profileSeedStamp,
   childEnv,
   isProgrammaticLaunch,
   profileAction,
   applyProfileSeed,
   parseShasums,
   parseTokenUrlLine,
+  waitForGui,
   findHostPort,
   isPortFree,
   SEED_MARKER,
+  EXPECTED_WEB_FAMILY_ROWS,
+  hasCompleteWebFamily,
   ensureProfileFallbacks,
   checkVcRuntime,
 } = require('../src/runtime.cjs');
+
+test('update boot requires every default 0.4.5 row and allows known opt-ins', () => {
+  assert.equal(EXPECTED_WEB_FAMILY_ROWS.length, 11);
+  assert.equal(hasCompleteWebFamily({ children: EXPECTED_WEB_FAMILY_ROWS }), true);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS].reverse() }), true);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS, '@linxin666/dsh-ssh'] }), true);
+  assert.equal(hasCompleteWebFamily({ children: EXPECTED_WEB_FAMILY_ROWS.slice(1) }), false);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS.slice(1), '@linxin666/unexpected'] }), false);
+  assert.equal(hasCompleteWebFamily({ children: [...EXPECTED_WEB_FAMILY_ROWS.slice(1), EXPECTED_WEB_FAMILY_ROWS[1]] }), false);
+  assert.equal(hasCompleteWebFamily({ children: null }), false);
+});
+
+test('update readiness waits for its own authenticated host after HTTP begins responding', async t => {
+  const server = http.createServer((_request, response) => { response.end('loading'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const port = server.address().port;
+  let tokenUrl = null, settled = false;
+  const ready = waitForGui(port, { deadlineMs: 5000, isAlive: () => true, getTokenUrl: () => tokenUrl })
+    .then(value => { settled = true; return value; });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(settled, false, 'HTTP readiness cannot acknowledge an update');
+  tokenUrl = `http://127.0.0.1:${port}/?token=own-host`;
+  assert.equal(await ready, tokenUrl);
+  await assert.rejects(waitForGui(port, { deadlineMs: 5000, isAlive: () => true,
+    getTokenUrl: () => 'http://127.0.0.1:1/?token=foreign-host' }), /unexpected GUI endpoint/);
+  await assert.rejects(waitForGui(port, { deadlineMs: 25, isAlive: () => true,
+    getTokenUrl: () => null }), /timed out/);
+  await assert.rejects(waitForGui(port, { deadlineMs: 5000, isAlive: () => false,
+    getTokenUrl: () => tokenUrl }), /exited before/);
+});
 
 function listenOn(port) {
   const server = net.createServer();
@@ -48,11 +85,33 @@ test('resolveRuntimePaths keeps the per-platform dir unpackaged (electron-builde
   assert.equal(devWin.nodeBin, path.join('/res', 'runtime', 'node-win-x64', 'node.exe'));
 });
 
-test('resolveDshHome follows the host lookup order', () => {
-  assert.equal(resolveDshHome({}, '/home/u'), path.join('/home/u', '.dsh'));
-  assert.equal(resolveDshHome({ DSH_HOME: '' }, '/home/u'), path.join('/home/u', '.dsh'));
+test('resolveDshHome defaults to the edition home and honors DSH_HOME overrides', () => {
+  // The desktop edition owns `~/.dsh-mathmodel` so it never fights a CLI `dsh web`
+  // install over the shared module-fallback links in one $DSH_HOME (src/runtime.cjs:89-105).
+  assert.equal(resolveDshHome({}, '/home/u'), path.join('/home/u', '.dsh-mathmodel'));
+  assert.equal(resolveDshHome({ DSH_HOME: '' }, '/home/u'), path.join('/home/u', '.dsh-mathmodel'));
+  assert.equal(resolveDshHome({ DSH_HOME: '   ' }, '/home/u'), path.join('/home/u', '.dsh-mathmodel'));
+  assert.equal(resolveDshHome({ DSH_HOME: '~' }, '/home/u'), '/home/u');
   assert.equal(resolveDshHome({ DSH_HOME: '~/custom' }, '/home/u'), path.join('/home/u', 'custom'));
+  assert.equal(resolveDshHome({ DSH_HOME: '~\\custom' }, '/home/u'), path.join('/home/u', 'custom'));
   assert.equal(resolveDshHome({ DSH_HOME: '/data/dsh' }, '/home/u'), path.resolve('/data/dsh'));
+});
+
+test('resolveProfileName rejects path traversal before profile seeding', () => {
+  assert.equal(resolveProfileName({}), 'mathmodel');
+  assert.equal(resolveProfileName({ DSH_PROFILE: 'team-1' }), 'team-1');
+  assert.equal(resolveProfileName({ DSH_PROFILE: '  research.test  ' }), 'research.test');
+  for (const name of ['.', '..', '../outside', 'a/b', 'a\\b', 'C:\\outside', '/outside']) {
+    assert.throws(() => resolveProfileName({ DSH_PROFILE: name }), /invalid DSH_PROFILE name/);
+  }
+});
+
+test('profile seed stamp changes for a new build or installation path', () => {
+  const stamp = { node: '22', host: 'rc.3', webAll: '0.3.23', builtAt: '2026-10-04T00:00:00Z' };
+  const current = profileSeedStamp(stamp, '/runtime/one');
+  assert.match(current, /framework-singleton-v1/);
+  assert.notEqual(current, profileSeedStamp({ ...stamp, builtAt: '2026-10-05T00:00:00Z' }, '/runtime/one'));
+  assert.notEqual(current, profileSeedStamp(stamp, '/runtime/two'));
 });
 
 test('childEnv normalizes PATH across platforms and case variants', () => {
@@ -96,7 +155,7 @@ test('profileAction seeds missing, leaves user-managed, reseeds stale', () => {
   assert.equal(profileAction(profile, 's2'), 'reseed', 'moved stamp triggers reseed');
 });
 
-test('applyProfileSeed keeps the user patch layer on reseed', () => {
+test('applyProfileSeed keeps only the root user patch layer on reseed', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-seed-'));
   const seed = path.join(dir, 'seed');
   const profile = path.join(dir, 'web');
@@ -104,18 +163,60 @@ test('applyProfileSeed keeps the user patch layer on reseed', () => {
   fs.writeFileSync(path.join(seed, 'package.json'), '{"name":"dsh-profile-web"}');
   fs.writeFileSync(path.join(seed, 'cordis.patch.yml'), '[]\n');
   fs.writeFileSync(path.join(seed, 'node_modules', 'pkg', 'index.js'), 'v1');
+  fs.writeFileSync(path.join(seed, 'node_modules', 'pkg', 'cordis.patch.yml'), 'plugin-v1\n');
 
   applyProfileSeed(seed, profile, 'seed', 's1', { appVersion: '0.1.0' });
   assert.equal(fs.readFileSync(path.join(profile, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'v1');
 
   // User edits the patch layer; the seed moves to a new node_modules payload.
   fs.writeFileSync(path.join(profile, 'cordis.patch.yml'), '- insert: []\n');
+  fs.writeFileSync(path.join(profile, 'cordis.patch.yml.bak'), 'user-backup\n');
   fs.writeFileSync(path.join(seed, 'node_modules', 'pkg', 'index.js'), 'v2');
+  fs.writeFileSync(path.join(seed, 'node_modules', 'pkg', 'cordis.patch.yml'), 'plugin-v2\n');
 
   applyProfileSeed(seed, profile, 'reseed', 's2', { appVersion: '0.1.1' });
   assert.equal(fs.readFileSync(path.join(profile, 'node_modules', 'pkg', 'index.js'), 'utf8'), 'v2');
   assert.equal(fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8'), '- insert: []\n', 'user patch survives');
+  assert.equal(fs.readFileSync(path.join(profile, 'cordis.patch.yml.bak'), 'utf8'), 'user-backup\n');
+  assert.equal(fs.readFileSync(path.join(profile, 'node_modules', 'pkg', 'cordis.patch.yml'), 'utf8'), 'plugin-v2\n', 'bundled plugin overlay is refreshed');
   assert.equal(JSON.parse(fs.readFileSync(path.join(profile, SEED_MARKER), 'utf8')).stamp, 's2');
+});
+
+test('applyProfileSeed rejects an external profile junction before seed or reseed writes', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-external-profile-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const seed = path.join(root, 'seed');
+  const external = path.join(root, 'external');
+  const profile = path.join(root, 'home', 'profiles', 'mathmodel');
+  fs.mkdirSync(seed);
+  fs.writeFileSync(path.join(seed, 'package.json'), '{"name":"seed"}');
+  fs.mkdirSync(external);
+  fs.writeFileSync(path.join(external, 'package.json'), '{"name":"external"}');
+  fs.writeFileSync(path.join(external, 'sentinel.txt'), 'keep');
+  fs.mkdirSync(path.dirname(profile), { recursive: true });
+  fs.symlinkSync(external, profile, 'junction');
+  for (const action of ['seed', 'reseed']) {
+    assert.throws(() => applyProfileSeed(seed, profile, action, 's1', {}), /not a local directory/);
+    assert.equal(fs.readFileSync(path.join(external, 'package.json'), 'utf8'), '{"name":"external"}');
+    assert.equal(fs.readFileSync(path.join(external, 'sentinel.txt'), 'utf8'), 'keep');
+  }
+});
+
+test('applyProfileSeed rejects an external profiles junction before writes', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-external-profiles-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const seed = path.join(root, 'seed');
+  const external = path.join(root, 'external-profiles');
+  const profiles = path.join(root, 'home', 'profiles');
+  fs.mkdirSync(seed);
+  fs.writeFileSync(path.join(seed, 'package.json'), '{"name":"seed"}');
+  fs.mkdirSync(external);
+  fs.writeFileSync(path.join(external, 'sentinel.txt'), 'keep');
+  fs.mkdirSync(path.dirname(profiles), { recursive: true });
+  fs.symlinkSync(external, profiles, 'junction');
+  assert.throws(() => applyProfileSeed(seed, path.join(profiles, 'mathmodel'), 'seed', 's1', {}), /not a local directory/);
+  assert.equal(fs.readFileSync(path.join(external, 'sentinel.txt'), 'utf8'), 'keep');
+  assert.equal(fs.existsSync(path.join(external, 'mathmodel')), false);
 });
 
 test('parseShasums parses SHASUMS256.txt lines', () => {

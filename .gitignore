@@ -4,9 +4,22 @@ resources/runtime/
 *.log
 
 # 打包运行时与产物（可由 scripts/prepare-runtime 重建，不入库）
-runtime/
+runtime/*
+# 运行时依赖清单与锁文件入库（node_modules 仍忽略）
+!runtime/host/
+!runtime/profile-web/
+runtime/host/*
+runtime/profile-web/*
+!runtime/host/package.json
+!runtime/host/pnpm-lock.yaml
+!runtime/host/pnpm-workspace.yaml
+!runtime/profile-web/package.json
+!runtime/profile-web/pnpm-lock.yaml
+!runtime/profile-web/pnpm-workspace.yaml
 resources/
 plugins/*/lib/
+!plugins/dsh-model-fusion/lib/
+!plugins/dsh-model-fusion/lib/**
 plugins/*/node_modules/
 plugins/*/dist/
 *.log
@@ -16,3 +29,4 @@ plugins/*/dist/
 asar-stage/
 app.asar.bak
 app-new.asar
+runtime-backup-*/

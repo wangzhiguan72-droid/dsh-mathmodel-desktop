@@ -16,6 +16,9 @@ asar: true
 files:
   - package.json
   - src/**
+  - scripts/restore-specialized-presets.mjs
+  - scripts/task-capabilities.mjs
+  - scripts/migrate-fusion-bundle.mjs
 
 # The runtime payload (staged by scripts/build-runtime.mjs under
 # resources/runtime/) ships unpacked next to the app:
@@ -39,12 +42,14 @@ mac:
   artifactName: dsh-mathmodel-desktop-${version}-mac-${arch}.${ext}
 
 win:
+  icon: src/assets/MetaMath-Harness.ico
   target:
     - nsis
     - zip
   artifactName: dsh-mathmodel-desktop-${version}-win-${arch}.${ext}
 
 nsis:
+  deleteAppDataOnUninstall: false
   oneClick: false
   perMachine: false
   allowElevation: true

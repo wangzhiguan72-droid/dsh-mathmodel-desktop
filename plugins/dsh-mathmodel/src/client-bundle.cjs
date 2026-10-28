@@ -195,13 +195,18 @@ async function browserDraftPayload(file) {
 
 function currentInputState(input) {
   const state = input?.state?.getSnapshot?.();
-  if (!state || !Array.isArray(state.imageIds)) throw new Error('输入草稿已不可用，请重试');
+  if (!state || (!Array.isArray(state.imageIds) && !Array.isArray(state.attachmentIds))) throw new Error('输入草稿已不可用，请重试');
   return state;
 }
 
 function createManualVisionActions({ stage, workspaceOf, draftImages, releaseDraftImages, inputForSession, notify, encodeImage = browserDraftPayload }) {
   return {
     notify,
+    imageIdsForInput(input) {
+      if (Array.isArray(input?.imageIds)) return input.imageIds;
+      if (!Array.isArray(input?.attachmentIds)) return [];
+      return draftImages(input.attachmentIds).filter((attachment) => attachment.kind === 'image').map((attachment) => attachment.id);
+    },
     async stageToDraft({ sessionId, imageIds }) {
       if (!Array.isArray(imageIds) || imageIds.length === 0) throw new Error('请先添加至少一张图片');
       const workspace = workspaceOf(sessionId);
@@ -211,10 +216,13 @@ function createManualVisionActions({ stage, workspaceOf, draftImages, releaseDra
       if (attachments.length !== imageIds.length) throw new Error('图片草稿已变更，请重试');
       const result = await stage(await Promise.all(attachments.map((attachment) => encodeImage(attachment.file))), workspace);
       const latest = currentInputState(input);
-      const liveImageIds = new Set(latest.imageIds);
+      const liveImageIds = new Set(latest.imageIds ?? latest.attachmentIds);
       if (!imageIds.every((id) => liveImageIds.has(id))) throw new Error('图片草稿已变更，未写入附图结果');
       input.setDraft(appendStagedImagesDraft(latest.draft, result?.files));
-      for (const id of imageIds) input.removeImage(id);
+      for (const id of imageIds) {
+        if (typeof input.removeAttachment === 'function') input.removeAttachment(id);
+        else input.removeImage(id);
+      }
       releaseDraftImages(attachments);
       input.notify?.('info', `已附图 ${result.files.length} 张；发送后模型将调用视觉工具查看原图。`);
       return result;
@@ -255,7 +263,22 @@ function createSkillSource({ fetchCatalog, flow, cardsForSession }) {
   };
 }
 
-if (typeof module !== 'undefined') module.exports = { appendStagedImagesDraft, browserDraftPayload, createCardFlow, createCredentialActions, createImageConnectionActions, createManualVisionActions, createOpenCodeRtActions, createStoredKeyModelDiscoveryActions, createSkillSource, panelSections, IMAGE_TEMPLATE_META, capabilityLabel };
+function createTaskCapabilityActions({ session, describe, confirm, describeTools, setTools, selectModel }) {
+  return {
+    describe: sessionId => describe(sessionId),
+    describeTools: sessionId => describeTools(sessionId),
+    setTools: (sessionId, selection) => setTools(sessionId, selection),
+    selectModel: (sessionId, provider, model) => selectModel(sessionId, provider, model),
+    async apply(sessionId, mask, preview) {
+      if (!Number.isInteger(mask) || mask < 0 || mask > 15) throw new Error('无效的能力组合');
+      if (!sessionId || session(sessionId)?.blank !== true) throw new Error('任务已经开始或尚未选择工作区；请在新的空白任务中设置能力。');
+      if (!preview?.hostHash) throw new Error('请先读取并确认 Host 状态。');
+      return await confirm(sessionId, `task-${mask.toString(16).padStart(2, '0')}`, preview.hostHash);
+    },
+  };
+}
+
+if (typeof module !== 'undefined') module.exports = { appendStagedImagesDraft, browserDraftPayload, createCardFlow, createCredentialActions, createImageConnectionActions, createManualVisionActions, createOpenCodeRtActions, createStoredKeyModelDiscoveryActions, createSkillSource, createTaskCapabilityActions, panelSections, IMAGE_TEMPLATE_META, capabilityLabel };
 
 if (typeof window !== 'undefined' && window.__ModuleLoader__) {
   window.__ModuleLoader__.load({
@@ -274,6 +297,8 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         style.textContent = `
           .dsh-mm-overlay{position:fixed;z-index:40;inset:68px 24px 140px;display:flex;align-items:flex-end;justify-content:center;pointer-events:none}
           .dsh-mm-card{box-sizing:border-box;width:min(680px,100%);max-height:100%;overflow:auto;pointer-events:auto;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 82%,transparent);border-radius:18px;background:var(--dsw-alias-bg-base);box-shadow:0 20px 54px rgba(15,23,42,.16);padding:20px 22px 0;scrollbar-width:thin;overscroll-behavior:contain}
+          .dsh-mm-modal-frame{position:fixed;z-index:100;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.25)}
+          .dsh-mm-modal{box-sizing:border-box;width:min(680px,100%);max-height:calc(100dvh - 40px);overflow:auto;border:1px solid var(--dsw-alias-border-l1,#ccd0d8);border-radius:18px;background:Canvas;color:CanvasText;padding:20px 22px 0;box-shadow:0 20px 54px rgba(15,23,42,.2);overscroll-behavior:contain}
           .dsh-mm-head{display:flex;gap:12px;align-items:flex-start}.dsh-mm-title{margin:0;flex:1;font-size:17px;line-height:1.35;font-weight:650;letter-spacing:-.01em}.dsh-mm-summary{margin:5px 0 16px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}
           .dsh-mm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;column-gap:18px;row-gap:12px}.dsh-mm-field{display:flex;min-width:0;flex-direction:column;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:550;line-height:1.35}.dsh-mm-field[data-wide=true]{grid-column:1/-1}
           .dsh-mm-field input,.dsh-mm-field select,.dsh-mm-field textarea{box-sizing:border-box;width:100%;min-height:38px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;outline:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 96%,var(--dsw-alias-label-primary));color:var(--dsw-alias-label-primary);padding:0 11px;font:inherit;font-size:13px;font-weight:400;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}.dsh-mm-field textarea{min-height:68px;padding:10px 11px;resize:vertical}.dsh-mm-field input:hover,.dsh-mm-field select:hover,.dsh-mm-field textarea:hover{border-color:var(--dsw-alias-label-tertiary)}.dsh-mm-field input:focus-visible,.dsh-mm-field select:focus-visible,.dsh-mm-field textarea:focus-visible{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent);background:var(--dsw-alias-bg-base)}
@@ -921,7 +946,7 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
 
       function ManualVisionDraftButton({ input, sessionId, actions }) {
         const [busy, setBusy] = React.useState(false);
-        const imageIds = input?.imageIds ?? [];
+        const imageIds = actions.imageIdsForInput(input);
         if (imageIds.length === 0) return null;
         const stage = async () => {
           setBusy(true);
@@ -968,6 +993,115 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         )), info);
       }
 
+      function TaskCapabilityPicker({ sessionId, sessions, actions }) {
+        const listing = React.useSyncExternalStore(callback => sessions.list.subscribe(callback), () => sessions.list.getSnapshot());
+        const session = listing.byId[sessionId];
+        const preset = session?.projectionValues?.agentPreset;
+        const selected = /^task-[0-9a-f]{2}$/.test(preset ?? '') ? Number.parseInt(preset.slice(5), 16) : null;
+        const [open, setOpen] = React.useState(false);
+        const [mask, setMask] = React.useState(selected ?? 15);
+        const [busy, setBusy] = React.useState(false);
+        const [error, setError] = React.useState('');
+        const [host, setHost] = React.useState(null);
+        React.useEffect(() => { setOpen(false); setError(''); setMask(selected ?? 15); }, [sessionId, preset]);
+        const blank = session?.blank === true && host?.locked !== true;
+        const groups = [['联网检索', 1], ['Skills', 2], ['子代理与工作流', 4], ['外部视觉与生图', 8]];
+        const apply = async () => {
+          if (busy) return;
+          setBusy(true); setError('');
+          try { await actions.apply(sessionId, mask, host); setOpen(false); }
+          catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+          finally { setBusy(false); }
+        };
+        return React.createElement(React.Fragment, null,
+          session?.projectionValues?.mathmodelCapabilities?.blockedReason ? React.createElement('span', { role: 'alert', title: session.projectionValues.mathmodelCapabilities.blockedReason }, '能力已暂停') : null,
+          React.createElement('button', { type: 'button', disabled: !sessionId || busy, 'aria-label': '任务前能力组合', 'aria-expanded': open,
+            title: blank ? '在第一条消息前组合工具与技能' : '选择工作区后配置；任务开始后锁定',
+            onClick: async () => { setMask(selected ?? 15); setHost(null); setError(''); setOpen(true); setBusy(true); try { setHost(await actions.describe(sessionId)); } catch (failure) { setError(String(failure.message ?? failure)); } finally { setBusy(false); } } }, selected === null ? '能力组合' : `能力组合 ${groups.filter(([, bit]) => selected & bit).length}/4`),
+          open ? ReactDOM.createPortal(React.createElement('div', { className: 'dsh-mm-modal-frame', onKeyDown: event => { if (event.key === 'Escape' && !busy) setOpen(false); } },
+            React.createElement('section', { className: 'dsh-mm-modal', role: 'dialog', 'aria-modal': true, 'aria-label': '任务前能力组合' },
+              React.createElement('h2', null, '任务前能力组合'),
+              React.createElement(TaskExtensionSwitches, { sessionId, actions }),
+              React.createElement('h3', null, '基础能力组合（首轮前设置）'),
+              React.createElement('p', null, '文件、终端、计划、压缩及权限机制始终保留。确认只切换当前空白任务，不发送消息；首轮开始后锁定。'),
+              ...groups.map(([label, bit]) => React.createElement('label', { key: bit, style: { display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0' } },
+                React.createElement('input', { type: 'checkbox', checked: Boolean(mask & bit), disabled: busy || !blank, onChange: event => { const checked = event.target.checked; setMask(value => checked ? value | bit : value & ~bit); } }), label)),
+              React.createElement('p', null, '外部视觉与生图只控制 vision_analyze、image_generate、editable_ppt_image；官方本地 read_image 保留。付费调用仍需要单次授权。'),
+              React.createElement('p', null, host?.locked ? (host.matches ? '基础组合已按任务快照锁定；上方本任务开关仍可在空闲时调整。' : '全局插件配置与旧快照不一致；恢复原配置或新建任务。上方开关不会重签旧快照。') : '下方确认只保存基础组合；上方本任务开关单独保存并立即生效。'),
+              React.createElement('button', { type: 'button', disabled: busy, onClick: async () => { setBusy(true); try { setHost(await actions.describe(sessionId)); setError(''); } catch (failure) { setError(String(failure.message ?? failure)); } finally { setBusy(false); } } }, '刷新 Host 状态'),
+              error ? React.createElement('div', { role: 'alert', className: 'dsh-mm-error' }, error) : null,
+              React.createElement('div', { className: 'dsh-mm-actions' },
+                React.createElement('button', { type: 'button', disabled: busy, onClick: () => setOpen(false) }, '取消'),
+                React.createElement('button', { type: 'button', className: 'dsh-mm-primary', disabled: busy || !blank || !host, onClick: apply }, busy ? '应用中…' : blank ? '确认组合与 Host 快照' : '任务已锁定')))), document.body) : null);
+      }
+
+      function TaskExtensionSwitches({ sessionId, actions }) {
+        const [runtime, setRuntime] = React.useState(null);
+        const [busy, setBusy] = React.useState(true);
+        const [error, setError] = React.useState('');
+        const [direct, setDirect] = React.useState('');
+        const generation = React.useRef(0);
+        const update = async operation => {
+          const own = ++generation.current;
+          setBusy(true); setError('');
+          try { const next = await operation(); if (own === generation.current) setRuntime(next); }
+          catch (failure) { if (own === generation.current) setError(String(failure.message ?? failure)); }
+          finally { if (own === generation.current) setBusy(false); }
+        };
+        React.useEffect(() => {
+          update(() => actions.describeTools(sessionId));
+          return () => { generation.current++; };
+        }, [sessionId]);
+        const selection = runtime?.selection;
+        const disabled = busy || !runtime?.canEdit;
+        const mcp = runtime?.inventory?.find(row => row.id === 'mcp');
+        const fusion = runtime?.model?.provider === 'dsh-model-fusion';
+        const physical = (runtime?.modelGroups ?? []).filter(group => group.id !== 'dsh-model-fusion')
+          .flatMap(group => group.models.map(model => ({ value: JSON.stringify([group.id, model.id]), label: `${group.name} · ${model.name ?? model.id}` })));
+        const selectedDirect = !fusion && runtime?.model ? JSON.stringify([runtime.model.provider, runtime.model.model]) : '';
+        const fallback = direct || (physical.some(option => option.value === selectedDirect) ? selectedDirect : physical[0]?.value) || '';
+        const set = patch => update(() => actions.setTools(sessionId, { ...selection, ...patch }));
+        const toggle = (key, label, available = true) => React.createElement('label', { key, style: { display: 'flex', gap: 10, margin: '12px 0' } },
+          React.createElement('input', { type: 'checkbox', checked: selection?.[key] === true, disabled: disabled || !available,
+            onChange: event => set({ [key]: event.target.checked }) }), label);
+        return React.createElement('section', { 'aria-label': '本任务扩展开关', style: { borderBottom: '1px solid #ccd0d8', paddingBottom: 16 } },
+          React.createElement('h3', null, '本任务扩展开关'),
+          React.createElement('p', null, '空闲时可随时调整，立即保存；不卸载全局插件，不影响其他任务。'),
+          runtime ? React.createElement(React.Fragment, null,
+            React.createElement('button', { type: 'button', disabled, onClick: () => set({ skills: false, mcp: false, taskBoard: false }) }, '精简：关闭 Skills、MCP、任务板工具'),
+            toggle('skills', 'Skills 技能目录与调用'),
+            !runtime.skillToolAvailable && selection?.skills ? React.createElement('small', null, '当前预设不包含 Skills；请在新任务的基础组合中开启。') : null,
+            runtime.skillToolAvailable && !selection?.skills ? React.createElement('p', null, '此任务另有自身注册的 skill 工具：调用已被禁止，但其 schema 仍可能显示。新任务的基础组合关闭 Skills 可避免加载。') : null,
+            toggle('mcp', `MCP 外部工具（Host 已发布 ${mcp?.publishedTools ?? 0} 个）`),
+            ...(mcp?.servers ?? []).map(server => React.createElement('label', { key: server.entryId, style: { display: 'flex', gap: 10, margin: '8px 0 8px 28px' } },
+              React.createElement('input', { type: 'checkbox', disabled: disabled || !selection?.mcp || !server.enabled,
+                checked: Boolean(selection?.mcp && !selection.disabledMcpServers.includes(server.serverName)),
+                onChange: event => set({ disabledMcpServers: event.target.checked ? selection.disabledMcpServers.filter(name => name !== server.serverName) : [...selection.disabledMcpServers, server.serverName] }) }),
+              `${server.serverName} · ${server.publishedTools} 个工具${server.publishedTools ? '，已发布' : '，尚无工具'}`)),
+            ...(mcp?.servers ?? []).filter(server => server.tools.length).map(server => React.createElement('details', { key: `tools-${server.entryId}`, style: { marginLeft: 28 } },
+              React.createElement('summary', null, `查看 ${server.serverName} 的工具名称`),
+              React.createElement('ul', null, server.tools.map(name => React.createElement('li', { key: name }, name))))),
+            toggle('taskBoard', '任务板工具'),
+            React.createElement('p', null, `当前任务向模型提供 ${runtime.toolCount} 个工具 schema。首轮前关闭会移除对应 schema；首轮后关闭只禁止调用、保留 schema，以免打断提供方前缀缓存。旧对话已包含的文字仍保留。`),
+            React.createElement('h4', null, `Fusion 双模型协作：${fusion ? '开启' : '关闭'}`),
+            React.createElement('p', null, `当前选择：${runtime.model?.provider ?? '未设置'} / ${runtime.model?.model ?? '未设置'}`),
+            React.createElement('label', null, '普通模型：', React.createElement('select', { value: fallback, disabled,
+              onChange: event => setDirect(event.target.value), style: { maxWidth: '100%', margin: '6px 0' }, 'aria-label': '关闭 Fusion 后使用的普通模型' },
+              physical.map(option => React.createElement('option', { key: option.value, value: option.value }, option.label)))),
+            React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
+              React.createElement('button', { type: 'button', disabled: disabled || !fallback, onClick: () => {
+                const [provider, model] = JSON.parse(fallback);
+                update(() => actions.selectModel(sessionId, provider, model));
+              } }, fusion ? '关闭本任务 Fusion，使用普通模型' : '使用所选普通模型'),
+              React.createElement('button', { type: 'button', disabled: disabled || fusion || !runtime.inventory?.some(row => row.id === 'fusion' && row.state === 'active'),
+                onClick: () => update(() => actions.selectModel(sessionId, 'dsh-model-fusion', 'auto')) }, '开启本任务 Fusion')),
+            React.createElement('small', null, '模型切换不发送消息。Fusion 关闭后只使用所选普通模型；与原生模型菜单一致，也更新新任务的默认模型。仅加载插件不会自动运行双模型协作。'),
+            React.createElement('p', null, `当前权限模式：${runtime.permissionPreset ?? '默认'}。只有选择 Auto 权限模式才会触发相应审查；官方 Auto 会额外调用审查模型。可在输入框的权限菜单切换。`),
+            !runtime.canEdit ? React.createElement('p', { role: 'status' }, '任务正在运行或等待交互，请停止本轮或等待结束后刷新。') : null) : null,
+          error ? React.createElement('p', { role: 'alert', className: 'dsh-mm-error' }, error) : null,
+          React.createElement('button', { type: 'button', disabled: busy, onClick: () => update(() => actions.describeTools(sessionId)) }, busy ? '读取中…' : '刷新本任务开关'));
+      }
+
       const inject = [
         'inputTriggers',
         'connection',
@@ -978,7 +1112,7 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         'conversation',
       ];
       const pass = Object.freeze({ parse: (value) => value });
-      const codec = Object.freeze({ mode: 'strict', typeSymbol: 'mathmodel#json', schema: pass });
+      const codec = Object.freeze({ mode: 'strict', typeSymbol: 'mathmodel#json', schema: pass, create: () => pass });
       const param = (name) => ({ name, wire: name, source: 'json', codec });
       const descriptor = (service, method, parameters = []) => ({
         id: `@deepseek-harness/dsh-mathmodel#${service}/${method}`,
@@ -987,6 +1121,11 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
       const TYPERT_REMOTE = Object.freeze({
         package: '@deepseek-harness/dsh-mathmodel',
         descriptors: [
+          descriptor('mathmodelHostCapabilities', 'describe', [param('sessionId')]),
+          descriptor('mathmodelHostCapabilities', 'confirm', [param('sessionId'), param('preset'), param('hostHash')]),
+          descriptor('mathmodelHostCapabilities', 'describeTools', [param('sessionId')]),
+          descriptor('mathmodelHostCapabilities', 'setTools', [param('sessionId'), param('selection')]),
+          descriptor('mathmodelHostCapabilities', 'selectModel', [param('sessionId'), param('provider'), param('model')]),
           descriptor('mathmodelCards', 'list'),
           descriptor('mathmodelCards', 'help'),
           descriptor('mathmodelCards', 'render', [param('skill'), param('values')]),
@@ -1102,8 +1241,10 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         const manualVisionActions = createManualVisionActions({
           stage: (images, workspace) => unwrapRemote(mathmodelManualVision.stage(images, workspace), 'mathmodelManualVision/stage'),
           workspaceOf: (sessionId) => sessions.list?.getSnapshot?.().byId[sessionId]?.cwd,
-          draftImages: (imageIds) => conversation.draftImages(imageIds),
-          releaseDraftImages: (attachments) => conversation.releaseDraftImages(attachments),
+          draftImages: (imageIds) => typeof conversation.resolveDraftAttachments === 'function'
+            ? conversation.resolveDraftAttachments(imageIds) : conversation.draftImages(imageIds),
+          releaseDraftImages: (attachments) => typeof conversation.releaseDraftAttachments === 'function'
+            ? conversation.releaseDraftAttachments(attachments) : conversation.releaseDraftImages(attachments),
           inputForSession: (sessionId) => {
             const actx = sessions.scope(sessionId);
             if (!actx) throw new Error('当前会话已不可用，请重试');
@@ -1142,6 +1283,21 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
           name: 'conversation.input.overlay', id: 'mathmodel-stored-key-model-discovery', order: -17,
           inject: () => ({ actions: { ...storedKeyModelDiscoveryActions, refreshOpenCodeRt: openCodeRtActions.refresh } }),
         }, StoredKeyModelDiscovery));
+        ctx.inject(['remote.agentPresets'], capabilityCtx => {
+          const hostCapabilities = ctx.get('remote.mathmodelHostCapabilities');
+          const actions = createTaskCapabilityActions({
+            session: sessionId => sessions.list.getSnapshot().byId[sessionId],
+            describe: sessionId => unwrapRemote(hostCapabilities.describe(sessionId), 'mathmodelHostCapabilities/describe'),
+            confirm: (sessionId, preset, hostHash) => unwrapRemote(hostCapabilities.confirm(sessionId, preset, hostHash), 'mathmodelHostCapabilities/confirm'),
+            describeTools: sessionId => unwrapRemote(hostCapabilities.describeTools(sessionId), 'mathmodelHostCapabilities/describeTools'),
+            setTools: (sessionId, selection) => unwrapRemote(hostCapabilities.setTools(sessionId, selection), 'mathmodelHostCapabilities/setTools'),
+            selectModel: (sessionId, provider, model) => unwrapRemote(hostCapabilities.selectModel(sessionId, provider, model), 'mathmodelHostCapabilities/selectModel'),
+          });
+          capabilityCtx.slots.inject('conversation.input.right', () => capabilityCtx.slots.register({
+            name: 'conversation.input.right', id: 'mathmodel-task-capabilities', order: -21,
+            inject: sessionId => ({ sessionId, sessions, actions }),
+          }, TaskCapabilityPicker));
+        });
         ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
           name: 'conversation.input.right', id: 'mathmodel-manual-vision-draft', order: -20,
           inject: () => ({ actions: manualVisionActions }),

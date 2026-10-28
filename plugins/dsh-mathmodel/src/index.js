@@ -1,7 +1,8 @@
 import { assertCompatibleHarnessVersion, detectHarnessVersion } from './version.js';
-import { installMathmodelHost } from './host.js';
+import { Config, installMathmodelHost } from './host.js';
 
 export const name = 'dsh-mathmodel';
+export { Config };
 
 export const inject = ['credentials', 'settings'];
 

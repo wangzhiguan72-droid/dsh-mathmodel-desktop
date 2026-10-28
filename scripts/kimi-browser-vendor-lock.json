@@ -1,0 +1,6 @@
+{
+  "source": "https://github.com/titanwings/dsh-better-browser at 506493224a21510c3f9cc7329a17e84af20879dc (release 0.3.6)",
+  "sha256": "c4f95d9579a1497f9a7d4daeda98ced2f0de8ae8c4b8031895f2fa422202d361",
+  "note": "Seals shipped source and compiled assets; local development node_modules are excluded.",
+  "compatibilityPatch": "2026-10-17: local manifest declares exact DSH .2.1rc2 after 13 tools import, official bridge navigate+snapshot proof; upstream legacy peers .0.1 were inaccurate. 2026-10-28: manifest engine and peers also accept 0.2.1-rc.4; imported dsh-llm/dsh-session/dsh-tools lib is byte-identical to rc.2."
+}

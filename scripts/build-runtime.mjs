@@ -11,16 +11,28 @@
  * shipped OS/arch and survive being copied into the user's $DSH_HOME.
  *
  * Usage: node scripts/build-runtime.mjs
+ *        node scripts/build-runtime.mjs --local-only
+ * The second form rebuilds and refreshes local plugins inside an existing
+ * staged runtime without reinstalling or copying the pinned host/profile.
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchGitGraphProfile } from './patch-git-graph.mjs';
+import { patchSessionExternalEvents } from './patch-session-external-events.mjs';
+import { patchDesktopUpdateProfile } from './patch-desktop-update-entry.mjs';
+import { patchWebAllDesktopLinksProfile, patchSshDesktopLinksProfile } from './patch-web-all-desktop-links.mjs';
+import { finalizeSandboxAutoProfileManifest, stageSandboxAutoPlugin } from './stage-sandbox-auto.mjs';
+import { stageKimiDaemon } from './stage-kimi-daemon.mjs';
+import { finalizeKimiBrowserProfileManifest, stageKimiBrowserPlugin } from './stage-kimi-browser.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
 const stagingRoot = path.join(desktopDir, 'resources', 'runtime');
+const fusionBuildLock = path.join(desktopDir, 'scripts', 'fusion-prebuilt-lock.json');
 
 /** Files copied from runtime/<part> into the staged payload. */
 const PART_FILES = {
@@ -53,13 +65,18 @@ function pnpmInstall(part) {
   // desktop runtime; failure class surfaced by release run 34077107610.
   const spawnOptions = {
     cwd: path.join(runtimeSrc, part),
-    env: { ...process.env },
+    env: { ...process.env, CI: 'true' },
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     shell: process.platform === 'win32',
   };
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const result = spawnSync('pnpm', ['install'], spawnOptions);
+    // pnpm 9 does not read these options from pnpm-workspace.yaml. Keep its
+    // install layout and peer policy consistent with the existing lockfiles.
+    const result = spawnSync('pnpm', [
+      'install', '--config.node-linker=hoisted',
+      '--config.auto-install-peers=' + String(part === 'host'),
+    ], spawnOptions);
     if (result.status === 0) {
       console.log(String(result.stdout).split('\n').slice(-6).join('\n'));
       return;
@@ -67,6 +84,9 @@ function pnpmInstall(part) {
     console.log('[build-runtime] pnpm install failed (attempt ' + attempt + '/' + attempts + '), status=' + result.status);
     if (result.stdout) console.log(String(result.stdout).split('\n').slice(-15).join('\n'));
     if (result.stderr) console.log(String(result.stderr).split('\n').slice(-15).join('\n'));
+    if (/ERR_PNPM_(?:LOCKFILE_CONFIG_MISMATCH|OUTDATED_LOCKFILE)/.test(String(result.stdout) + String(result.stderr))) {
+      throw new Error('runtime/' + part + ' lockfile does not match its install configuration');
+    }
     if (attempt < attempts) {
       // Synchronous, dependency-free sleep that works on every platform.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);
@@ -156,24 +176,165 @@ function assertNoSymlinks(root) {
   }
 }
 
+export function copyRuntimeModules(source, destination) {
+  const virtualStore = path.resolve(source, '.pnpm');
+  // Hoisted runtime packages are copied as real files. An old root store
+  // contains dependency junctions that would expand into redundant trees.
+  // Active package links and any nested node_modules remain dereferenced.
+  fs.cpSync(source, destination, {
+    recursive: true,
+    dereference: true,
+    filter: entry => path.resolve(entry) !== virtualStore,
+  });
+  removeBinDirs(destination);
+  assertNoSymlinks(destination);
+}
+
 function stage(part) {
   const dest = path.join(stagingRoot, part);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   for (const name of PART_FILES[part]) {
-    const source = path.join(runtimeSrc, part, name);
+    const source = part === 'profile-web' && name === 'cordis.patch.yml'
+      ? path.join(desktopDir, 'build', 'profile.cordis.patch.yml')
+      : path.join(runtimeSrc, part, name);
     if (!fs.existsSync(source)) {
       if (name === 'pnpm-lock.yaml') continue;
       throw new Error('expected ' + path.join('runtime', part, name) + ' after pnpm install');
     }
-    fs.cpSync(source, path.join(dest, name), { recursive: true, dereference: true });
+    if (name === 'node_modules') copyRuntimeModules(source, path.join(dest, name));
+    else fs.cpSync(source, path.join(dest, name), { recursive: true, dereference: true });
   }
   // node_modules/.bin holds pnpm's command shims (symlinks) at any depth;
   // nothing at runtime resolves through them, and symlinks must not enter
   // the installer.
-  removeBinDirs(path.join(dest, 'node_modules'));
-  assertNoSymlinks(path.join(dest, 'node_modules'));
   console.log('[build-runtime] staged ' + part + ' -> ' + path.relative(desktopDir, dest));
+}
+
+// pnpm may reuse a cached file: package when its version is unchanged. Always
+// stage the freshly built local plugin instead of that cached dependency.
+export function stageLocalPlugin(profileDir, pluginDir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf8'));
+  if (manifest.name !== '@deepseek-harness/dsh-mathmodel' || manifest.main !== 'lib/index.js') {
+    throw new Error('Unexpected local plugin identity');
+  }
+  const lib = path.join(pluginDir, 'lib');
+  if (!fs.lstatSync(lib).isDirectory() || fs.lstatSync(lib).isSymbolicLink()) throw new Error('Unsafe plugin build directory');
+  assertNoSymlinks(lib);
+  if (!fs.statSync(path.join(lib, 'index.js')).isFile()) throw new Error('Local plugin has not been built');
+  const target = path.join(profileDir, 'node_modules', '@deepseek-harness', 'dsh-mathmodel');
+  const scope = path.dirname(target);
+  if (!fs.lstatSync(scope).isDirectory() || fs.lstatSync(scope).isSymbolicLink()) throw new Error('Unsafe plugin package scope');
+  if (fs.existsSync(target)) {
+    if (!fs.lstatSync(target).isDirectory() || fs.lstatSync(target).isSymbolicLink()) throw new Error('Unsafe staged plugin');
+    if (path.dirname(path.resolve(target)) !== path.resolve(scope)) throw new Error('Plugin target escaped staging scope');
+    fs.rmSync(target, { recursive: true });
+  }
+  fs.mkdirSync(target);
+  fs.copyFileSync(path.join(pluginDir, 'package.json'), path.join(target, 'package.json'));
+  fs.cpSync(lib, path.join(target, 'lib'), { recursive: true });
+}
+
+const FUSION_ASSETS = [
+  'package.json', 'lib', 'src', 'prompts', 'contracts', 'profiles',
+  'cordis.patch.yml', 'dshx.yml', 'LICENSE', 'README.md', 'README.en.md',
+  'INSTALL.md', 'INSTALL.zh.md', 'docs/COMPATIBILITY.md', 'docs/EVIDENCE.md',
+];
+
+function assertRealTree(root) {
+  if (fs.lstatSync(root).isSymbolicLink()) throw new Error('Unsafe symlink in local plugin: ' + root);
+  if (!fs.lstatSync(root).isDirectory()) return;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) assertRealTree(path.join(root, entry.name));
+}
+
+function treeDigest(root) {
+  assertRealTree(root);
+  const hash = createHash('sha256');
+  const walk = (dir, relative = '') => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+      const next = relative ? relative + '/' + entry.name : entry.name;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full, next);
+      else if (entry.isFile()) {
+        hash.update(next + '\0');
+        hash.update(fs.readFileSync(full));
+        hash.update('\0');
+      } else throw new Error('Unsupported local plugin entry: ' + full);
+    }
+  };
+  walk(root);
+  return hash.digest('hex');
+}
+
+/** Integrity seal for vendored Fusion sources and their separately built output. */
+export function fusionBuildDigest(pluginDir) {
+  return { sourceSha256: treeDigest(path.join(pluginDir, 'src')), libSha256: treeDigest(path.join(pluginDir, 'lib')) };
+}
+
+function assertFusionLock(pluginDir, lockFile) {
+  const sealed = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+  const current = fusionBuildDigest(pluginDir);
+  if (sealed.sourceSha256 !== current.sourceSha256 || sealed.libSha256 !== current.libSha256) {
+    throw new Error('Fusion source/lib integrity mismatch: regenerate the prebuilt lib and review its lock before staging');
+  }
+  return current;
+}
+
+function fusionAssetDigest(asset) {
+  assertRealTree(asset);
+  return fs.statSync(asset).isDirectory()
+    ? treeDigest(asset)
+    : createHash('sha256').update(fs.readFileSync(asset)).digest('hex');
+}
+
+/** Read-only package gate: check the vendored lock and every staged runtime asset. */
+export function verifyStagedFusion(profileDir, pluginDir, lockFile = fusionBuildLock) {
+  const current = assertFusionLock(pluginDir, lockFile);
+  if (!fs.lstatSync(profileDir).isDirectory() || fs.lstatSync(profileDir).isSymbolicLink()) throw new Error('Unsafe Fusion staging profile');
+  const modules = path.join(profileDir, 'node_modules');
+  if (!fs.lstatSync(modules).isDirectory() || fs.lstatSync(modules).isSymbolicLink()) throw new Error('Unsafe Fusion staging node_modules');
+  const staged = path.join(modules, 'dsh-model-fusion');
+  if (!fs.existsSync(staged) || !fs.lstatSync(staged).isDirectory() || fs.lstatSync(staged).isSymbolicLink()) {
+    throw new Error('Missing or unsafe staged Fusion plugin');
+  }
+  for (const asset of FUSION_ASSETS) {
+    const source = path.join(pluginDir, asset);
+    const target = path.join(staged, asset);
+    if (!fs.existsSync(source) || !fs.existsSync(target)) throw new Error('Missing Fusion runtime asset: ' + asset);
+    if (fusionAssetDigest(source) !== fusionAssetDigest(target)) throw new Error('Staged Fusion runtime asset mismatch: ' + asset);
+  }
+  return current;
+}
+
+export function stageFusionPlugin(profileDir, pluginDir, lockFile = fusionBuildLock) {
+  assertRealTree(pluginDir);
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf8'));
+  if (manifest.name !== 'dsh-model-fusion' || manifest.exports?.['.']?.import !== './lib/dsh-model-fusion.js') {
+    throw new Error('Unexpected Fusion plugin identity');
+  }
+  for (const asset of FUSION_ASSETS) {
+    const source = path.join(pluginDir, asset);
+    if (!fs.existsSync(source)) throw new Error('Missing Fusion asset: ' + asset);
+    assertRealTree(source);
+  }
+  for (const entry of ['lib/dsh-model-fusion.js', 'lib/client.js']) {
+    if (!fs.statSync(path.join(pluginDir, entry)).isFile()) throw new Error('Missing Fusion entrypoint: ' + entry);
+  }
+  const current = assertFusionLock(pluginDir, lockFile);
+  if (!fs.lstatSync(profileDir).isDirectory() || fs.lstatSync(profileDir).isSymbolicLink()) throw new Error('Unsafe Fusion staging profile');
+  const modules = path.join(profileDir, 'node_modules');
+  if (!fs.lstatSync(modules).isDirectory() || fs.lstatSync(modules).isSymbolicLink()) throw new Error('Unsafe Fusion staging node_modules');
+  const target = path.join(modules, 'dsh-model-fusion');
+  if (fs.existsSync(target)) {
+    if (!fs.lstatSync(target).isDirectory() || fs.lstatSync(target).isSymbolicLink()) throw new Error('Unsafe staged Fusion plugin');
+    fs.rmSync(target, { recursive: true });
+  }
+  fs.mkdirSync(target);
+  for (const asset of FUSION_ASSETS) {
+    fs.cpSync(path.join(pluginDir, asset), path.join(target, asset), { recursive: true });
+  }
+  console.log('[build-runtime] staged fresh dsh-model-fusion -> ' + path.relative(desktopDir, target));
+  return current;
 }
 
 /**
@@ -235,10 +396,19 @@ const CLOUDFLARED_WIN_EXE_URL = 'https://github.com/cloudflare/cloudflared/relea
  * cannot carry two same-named darwin binaries, so the tunnel plugin
  * validates the staged binary and re-fetches the matching arch on first use.
  */
-async function stageCloudflaredWindowsBinary() {
+export async function stageCloudflaredWindowsBinary() {
   const exe = path.join(stagingRoot, 'profile-web', 'node_modules', 'cloudflared', 'bin', 'cloudflared.exe');
+  const cached = path.join(runtimeSrc, 'cache', 'cloudflared-windows-amd64.exe');
   if (fs.existsSync(exe) && isWindowsPe(exe)) {
     console.log('[build-runtime] cloudflared.exe already staged, skipping');
+    return;
+  }
+  // Profile staging replaces its tree. Keep the previously downloaded
+  // official Windows binary outside that tree so rebuilds can work offline.
+  if (fs.existsSync(cached) && isWindowsPe(cached)) {
+    fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.copyFileSync(cached, exe);
+    console.log('[build-runtime] staged cached cloudflared.exe');
     return;
   }
   console.log('[build-runtime] downloading ' + CLOUDFLARED_WIN_EXE_URL);
@@ -250,6 +420,8 @@ async function stageCloudflaredWindowsBinary() {
       throw new Error('downloaded cloudflared.exe is not a Windows PE binary (' + buffer.length + ' bytes)');
     }
     fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.mkdirSync(path.dirname(cached), { recursive: true });
+    fs.writeFileSync(cached, buffer);
     fs.writeFileSync(exe, buffer);
     console.log('[build-runtime] staged cloudflared.exe -> ' + path.relative(desktopDir, exe));
   } catch (error) {
@@ -286,18 +458,58 @@ function assertRuntimeEntrypoints() {
 }
 
 async function main() {
+  const localOnly = process.argv.includes('--local-only');
+  if (process.argv.slice(2).some(arg => arg !== '--local-only')) throw new Error('Unknown build-runtime argument');
   const hostVersion = readPinnedVersion('host', '@deepseek-ai/dsh');
   const webAllVersion = readPinnedVersion('profile-web', '@linxin666/dsh-web-all');
+  if (localOnly) {
+    const stampPath = path.join(stagingRoot, 'VERSION.json');
+    const required = [
+      stampPath,
+      path.join(stagingRoot, 'host', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      path.join(stagingRoot, 'profile-web', 'node_modules', '@linxin666', 'dsh-web-all', 'cordis.patch.yml'),
+    ];
+    for (const file of required) if (!fs.existsSync(file)) throw new Error('--local-only requires staged file ' + path.relative(desktopDir, file));
+    const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
+    if (stamp.host !== '@deepseek-ai/dsh@' + hostVersion || stamp.webAll !== '@linxin666/dsh-web-all@' + webAllVersion) {
+      throw new Error('--local-only staged runtime versions differ from current pinned versions');
+    }
+  }
 
-  pnpmInstall('host');
-  pnpmInstall('profile-web');
-  hoistPnpmFallbacks('host');
-  hoistPnpmFallbacks('profile-web');
-  reconcileProfileCohort('profile-web');
-  stage('host');
-  stage('profile-web');
-  await stageCloudflaredWindowsBinary();
-  assertRuntimeEntrypoints();
+  const pluginDir = path.join(desktopDir, 'plugins', 'dsh-mathmodel');
+  const pluginBuild = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'build.mjs')],
+    { cwd: pluginDir, stdio: 'inherit', windowsHide: true });
+  if (pluginBuild.status !== 0) throw new Error('Local plugin build failed');
+  if (!localOnly) {
+    pnpmInstall('host');
+    pnpmInstall('profile-web');
+    hoistPnpmFallbacks('host');
+    hoistPnpmFallbacks('profile-web');
+    reconcileProfileCohort('profile-web');
+    stage('host');
+    stage('profile-web');
+  } else {
+    // Refresh the seed manifest and patch alongside local plugin bytes, so a
+    // local-only release includes newly selected bundles and settings wiring.
+    fs.copyFileSync(path.join(runtimeSrc, 'profile-web', 'package.json'), path.join(stagingRoot, 'profile-web', 'package.json'));
+    fs.copyFileSync(path.join(desktopDir, 'build', 'profile.cordis.patch.yml'), path.join(stagingRoot, 'profile-web', 'cordis.patch.yml'));
+  }
+  stageLocalPlugin(path.join(stagingRoot, 'profile-web'), pluginDir);
+  fs.copyFileSync(path.join(desktopDir, 'src', 'host-compile-cache.cjs'), path.join(stagingRoot, 'host', 'startup-cache.cjs'));
+  stageFusionPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-model-fusion'));
+  stageSandboxAutoPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-auto-mode'));
+  finalizeSandboxAutoProfileManifest(path.join(stagingRoot, 'profile-web'));
+  stageKimiBrowserPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-better-browser'));
+  finalizeKimiBrowserProfileManifest(path.join(stagingRoot, 'profile-web'));
+  await patchSessionExternalEvents({ runtimeRoot: path.join(stagingRoot, 'host', 'node_modules') });
+  if (!localOnly) {
+    await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));
+    await patchDesktopUpdateProfile(path.join(stagingRoot, 'profile-web'));
+    await patchWebAllDesktopLinksProfile(path.join(stagingRoot, 'profile-web'));
+    await patchSshDesktopLinksProfile(path.join(stagingRoot, 'profile-web'));
+    await stageCloudflaredWindowsBinary();
+    assertRuntimeEntrypoints();
+  }
 
   const stamp = {
     node: 'see .node-version markers under node-<os>-<cpu>',
@@ -305,9 +517,10 @@ async function main() {
     webAll: '@linxin666/dsh-web-all@' + webAllVersion,
     builtAt: new Date().toISOString(),
   };
+  stageKimiDaemon();
   fs.mkdirSync(stagingRoot, { recursive: true });
   fs.writeFileSync(path.join(stagingRoot, 'VERSION.json'), JSON.stringify(stamp, null, 2) + '\n');
   console.log('[build-runtime] runtime payload ready: ' + stamp.host + ' + ' + stamp.webAll);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

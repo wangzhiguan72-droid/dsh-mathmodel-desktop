@@ -1,0 +1,5 @@
+{
+  "source": "D:/deepseek harness/dsh-auto-mode-main release 0.2.0 prebuilt distribution",
+  "sha256": "cf0031f89185bee11d3c456919add6fbe10de054444c73b7dcc48efeb2f2c7cc",
+  "compatibilityPatch": "Local 2026-10-17 port to DSH 0.2.1-rc.2 with current workingDirectory resolution and failing-closed regression; 2026-10-28 extended the same exact-version gate and live-directory guard to 0.2.1-rc.4 (dsh-working-directory unchanged between them). Archived upstream remains unchanged."
+}

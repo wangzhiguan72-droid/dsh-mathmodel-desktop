@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 const PACKAGE = '@deepseek-harness/dsh-mathmodel';
-const result = (symbol) => ({ mode: 'strict', typeSymbol: symbol, schema: z.unknown() });
+const strictCodec = (typeSymbol, schema) => ({ mode: 'strict', typeSymbol, schema, create: () => schema });
+const result = (symbol) => strictCodec(symbol, z.unknown());
 const parameter = (name, schema = z.string()) => ({
   name, wire: name, source: 'json',
-  codec: { mode: 'strict', typeSymbol: `mathmodel#${name}`, schema },
+  codec: strictCodec(`mathmodel#${name}`, schema),
 });
 const invocation = (service, method, parameters = []) => ({
   id: `${PACKAGE}#${service}/${method}`,
@@ -22,6 +23,11 @@ const draftSchema = z.object({
 });
 
 export const MATHMODEL_INVOCATIONS = Object.freeze([
+  invocation('mathmodelHostCapabilities', 'describe', [parameter('sessionId')]),
+  invocation('mathmodelHostCapabilities', 'confirm', [parameter('sessionId'), parameter('preset'), parameter('hostHash')]),
+  invocation('mathmodelHostCapabilities', 'describeTools', [parameter('sessionId')]),
+  invocation('mathmodelHostCapabilities', 'setTools', [parameter('sessionId'), parameter('selection', z.object({ skills: z.boolean(), mcp: z.boolean(), taskBoard: z.boolean(), disabledMcpServers: z.array(z.string()) }).strict())]),
+  invocation('mathmodelHostCapabilities', 'selectModel', [parameter('sessionId'), parameter('provider'), parameter('model')]),
   invocation('mathmodelCards', 'list'),
   invocation('mathmodelCards', 'help'),
   invocation('mathmodelCards', 'render', [parameter('skill'), parameter('values', z.record(z.string(), z.unknown()))]),

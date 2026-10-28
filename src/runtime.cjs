@@ -24,6 +24,85 @@ const DESKTOP_PORT_SPAN = 100;
 /** Marker file written into a profile directory this app seeded itself. */
 const SEED_MARKER = '.dsh-desktop-seed.json';
 
+/** Active 0.4.5 shell rows; direct external inserts and disabled opt-ins are absent from /rows. */
+const EXPECTED_WEB_FAMILY_ROWS = Object.freeze([
+  'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
+  'dsh-client-ui-market',
+  'dsh-client-ui-task-board', 'dsh-client-ui-task-board-github',
+  'dsh-client-ui-git-graph', 'dsh-remote-web-ui', 'dsh-update',
+  'dsh-usage', 'dsh-session-archive', 'dsh-client-ui-model-capabilities',
+].map((name) => '@linxin666/' + name));
+const OPTIONAL_WEB_FAMILY_ROWS = new Set([
+  '@linxin666/dsh-ssh', '@linxin666/dsh-liangshen',
+  '@linxin666/dsh-client-ui-skill-explorer',
+]);
+
+/** 0.4.7's shell ledger excludes retired model-capabilities; win-bash is Windows-only. */
+const WEB_FAMILY_ROWS_047 = Object.freeze([
+  ...EXPECTED_WEB_FAMILY_ROWS.filter(name => name !== '@linxin666/dsh-client-ui-model-capabilities'),
+  ...(process.platform === 'win32' ? ['@linxin666/dsh-win-bash'] : []),
+]);
+const OPTIONAL_WEB_FAMILY_ROWS_047 = new Set([
+  '@linxin666/dsh-ssh', '@linxin666/dsh-liangshen',
+  '@linxin666/dsh-client-ui-skill-explorer',
+]);
+
+const LEGACY_WEB_FAMILY_ROWS = Object.freeze([
+  'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
+  'dsh-client-ui-community-plugins', 'dsh-client-ui-market',
+  'dsh-client-ui-task-board', 'dsh-client-ui-git-graph', 'dsh-remote-web-ui',
+  'dsh-pet', 'dsh-usage', 'dsh-session-archive',
+  'dsh-client-ui-model-capabilities', 'dsh-client-ui-preset-center', 'dsh-client-ui-skin-center',
+].map(name => '@linxin666/' + name));
+
+/**
+ * 0.4.11 dropped /api/dsh-web-all/rows: each family row mounts its real package,
+ * so health reads the active @linxin666 rows from the plugin manager inventory.
+ * Default-off ssh/skill-explorer and user-switchable liangshen may be absent.
+ */
+const WEB_FAMILY_ROWS_0411 = Object.freeze([
+  'dsh-web-all', 'dsh-client-ui-web-ui-settings', 'dsh-client-ui-plugin-manager',
+  'dsh-client-ui-market', 'dsh-client-ui-task-board', 'dsh-client-ui-task-board-github',
+  'dsh-agents', 'dsh-client-ui-git-graph', 'dsh-remote-web-ui', 'dsh-update',
+  'dsh-remote-bridge', 'dsh-task-board-remote', 'dsh-usage', 'dsh-session-archive',
+  'dsh-client-ui-message-edit', 'dsh-i18n', 'dsh-client-ui-browser-view',
+  'dsh-client-ui-community-plugins', 'dsh-pet', 'dsh-client-ui-preset-center', 'dsh-client-ui-skin-center',
+  ...(process.platform === 'win32' ? ['dsh-win-bash'] : []),
+].map(name => '@linxin666/' + name));
+const OPTIONAL_WEB_FAMILY_ROWS_0411 = new Set([
+  '@linxin666/dsh-ssh', '@linxin666/dsh-liangshen',
+  '@linxin666/dsh-client-ui-skill-explorer',
+]);
+
+/** Active family package names from a plugin-manager listPlugins result. */
+function activeWebFamilyRows(inventory) {
+  const rows = Array.isArray(inventory) ? inventory : inventory?.plugins;
+  if (!Array.isArray(rows)) return null;
+  return rows.filter(row => typeof row?.moduleName === 'string' && row.moduleName.startsWith('@linxin666/') &&
+    row.enabled === true && row.fiberPhase === 'active').map(row => row.moduleName);
+}
+
+function hasCompleteWebFamily(rows, version = '0.4.5') {
+  if (version === '0.4.11') {
+    const children = rows?.children;
+    if (!Array.isArray(children) || new Set(children).size !== children.length) return false;
+    const required = new Set(WEB_FAMILY_ROWS_0411);
+    return WEB_FAMILY_ROWS_0411.every(name => children.includes(name)) &&
+      children.every(name => required.has(name) || OPTIONAL_WEB_FAMILY_ROWS_0411.has(name));
+  }
+  const children = rows?.children;
+  if (!Array.isArray(children) || new Set(children).size !== children.length) return false;
+  const names = version === '0.4.5' ? EXPECTED_WEB_FAMILY_ROWS
+    : version === '0.4.7' ? WEB_FAMILY_ROWS_047
+    : version === '0.3.23' ? LEGACY_WEB_FAMILY_ROWS : null;
+  if (!names) return false;
+  const required = new Set(names);
+  return names.every((name) => children.includes(name)) &&
+    children.every((name) => required.has(name) ||
+      version === '0.4.5' && OPTIONAL_WEB_FAMILY_ROWS.has(name) ||
+      version === '0.4.7' && OPTIONAL_WEB_FAMILY_ROWS_047.has(name));
+}
+
 /**
  * argv fragments that mark a second launch as a programmatic spawn of this
  * executable (doctor supervisor/provisioning children, CLI helpers) rather
@@ -83,7 +162,23 @@ function resolveRuntimePaths(resourcesRoot, platform, arch, packaged = true) {
 function resolveProfileName(env) {
   const configured = env.DSH_PROFILE;
   if (configured === undefined || configured.trim() === '') return 'mathmodel';
-  return configured.trim();
+  const name = configured.trim();
+  if (name === '.' || name === '..' || /[\\/:\0]/.test(name)) {
+    throw new Error(`invalid DSH_PROFILE name: ${name}`);
+  }
+  return name;
+}
+
+/** Changes when a new runtime build or installation location needs fresh links. */
+function profileSeedStamp(stamp, runtimeRoot) {
+  return [
+    'framework-singleton-v1',
+    stamp?.node ?? 'unknown',
+    stamp?.host ?? 'unknown',
+    stamp?.webAll ?? 'unknown',
+    stamp?.builtAt ?? 'unknown',
+    path.resolve(runtimeRoot),
+  ].join(' / ');
 }
 
 /**
@@ -248,6 +343,104 @@ function ensureProfileFallbacks(home, hostRuntimeDir, profileName = 'web') {
   }
 }
 
+/** Make shared official packages resolve to the host's single physical copy. */
+function ensureFrameworkCohort(home, hostRuntimeDir, profileName = 'web', expectedStamp) {
+  const profileDir = path.join(home, 'profiles', profileName);
+  const markerFile = path.join(profileDir, SEED_MARKER);
+  if (!fs.existsSync(markerFile)) return { linked: [] };
+  const marker = readStampFile(markerFile);
+  if (typeof marker?.stamp !== 'string' || marker.stamp.trim() === '') {
+    throw new Error(`framework cohort: invalid profile seed marker: ${markerFile}`);
+  }
+  if (!fs.existsSync(path.join(profileDir, 'package.json'))) {
+    throw new Error(`framework cohort: seeded profile package.json is missing: ${profileDir}`);
+  }
+  if (expectedStamp !== undefined && marker.stamp !== expectedStamp) {
+    throw new Error(`framework cohort: profile seed stamp differs from runtime (${marker.stamp} != ${expectedStamp})`);
+  }
+
+  const samePath = (left, right) => process.platform === 'win32'
+    ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
+    : path.resolve(left) === path.resolve(right);
+  const requireLocalDirectory = (directory, parent) => {
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() ||
+        !samePath(fs.realpathSync(directory), path.join(fs.realpathSync(parent), path.basename(directory)))) {
+      throw new Error(`framework cohort: profile directory escapes its owner: ${directory}`);
+    }
+  };
+  requireLocalDirectory(path.join(home, 'profiles'), home);
+  requireLocalDirectory(profileDir, path.join(home, 'profiles'));
+  const profileModules = path.join(profileDir, 'node_modules');
+  const profileScope = path.join(profileModules, '@deepseek-ai');
+  if (!fs.existsSync(profileScope)) {
+    throw new Error(`framework cohort: seeded profile official package scope is missing: ${profileScope}`);
+  }
+  requireLocalDirectory(profileModules, profileDir);
+  requireLocalDirectory(profileScope, profileModules);
+
+  const hostScope = path.join(hostRuntimeDir, 'node_modules', '@deepseek-ai');
+  if (!fs.existsSync(hostScope)) return { linked: [] };
+  if (!fs.lstatSync(hostScope).isDirectory() || fs.lstatSync(hostScope).isSymbolicLink()) {
+    throw new Error(`framework cohort: host scope is not a real directory: ${hostScope}`);
+  }
+  const toLink = [];
+  for (const entry of fs.readdirSync(profileScope, { withFileTypes: true })) {
+    const profilePkg = path.join(profileScope, entry.name);
+    const hostPkg = path.join(hostScope, entry.name);
+    if (!fs.existsSync(path.join(hostPkg, 'package.json'))) continue;
+    if (!fs.lstatSync(hostPkg).isDirectory() || fs.lstatSync(hostPkg).isSymbolicLink()) continue;
+    if (entry.isSymbolicLink()) {
+      if (!samePath(fs.realpathSync(profilePkg), fs.realpathSync(hostPkg))) {
+        throw new Error(`framework cohort: profile package points outside host runtime: ${profilePkg}`);
+      }
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    requireLocalDirectory(profilePkg, profileScope);
+    if (!fs.existsSync(path.join(profilePkg, 'package.json'))) continue;
+    const profileManifest = JSON.parse(fs.readFileSync(path.join(profilePkg, 'package.json'), 'utf8'));
+    const hostManifest = JSON.parse(fs.readFileSync(path.join(hostPkg, 'package.json'), 'utf8'));
+    if (profileManifest.name !== hostManifest.name || profileManifest.version !== hostManifest.version) {
+      throw new Error(`framework cohort: ${entry.name} differs between profile (${profileManifest.name}@${profileManifest.version}) and host (${hostManifest.name}@${hostManifest.version})`);
+    }
+    toLink.push({ name: entry.name, profilePkg, hostPkg });
+  }
+  const linked = [];
+  let backupDir;
+  const moved = [];
+  try {
+    for (const { name, profilePkg, hostPkg } of toLink) {
+      if (!backupDir) backupDir = fs.mkdtempSync(path.join(profileDir, '.dsh-framework-cohort-backup-'));
+      const backupPkg = path.join(backupDir, name);
+      fs.renameSync(profilePkg, backupPkg);
+      moved.push({ name, profilePkg, backupPkg });
+      fs.symlinkSync(hostPkg, profilePkg, 'junction');
+      linked.push(name);
+    }
+  } catch (error) {
+    const restoreErrors = [];
+    for (const { name, profilePkg, backupPkg } of moved.reverse()) {
+      try {
+        let current;
+        try { current = fs.lstatSync(profilePkg); } catch (probeError) {
+          if (probeError.code !== 'ENOENT') throw probeError;
+        }
+        if (current) {
+          if (!current.isSymbolicLink()) throw new Error(`unexpected replacement at ${profilePkg}`);
+          fs.unlinkSync(profilePkg);
+        }
+        fs.renameSync(backupPkg, profilePkg);
+      } catch (restoreError) {
+        restoreErrors.push(`${name}: ${restoreError.message}; original remains at ${backupPkg}`);
+      }
+    }
+    const recovery = restoreErrors.length > 0 ? `; rollback failed: ${restoreErrors.join('; ')}` : '; previous packages restored';
+    throw new Error(`framework cohort: package alignment failed: ${error.message}${recovery}`, { cause: error });
+  }
+  return { linked, backupDir };
+}
+
 /**
  * Check whether required Visual C++ runtime libraries exist on Windows.
  * Returns true on non-Windows platforms or when the required DLLs are present.
@@ -289,6 +482,11 @@ function profileAction(profileDir, stamp) {
   return marker.stamp === stamp ? 'leave' : 'reseed';
 }
 
+function isDesktopSeededProfile(profileDir) {
+  const marker = readStampFile(path.join(profileDir, SEED_MARKER));
+  return Boolean(marker && typeof marker.stamp === 'string' && marker.stamp.length > 0);
+}
+
 /**
  * Copy the bundled seed profile into place. Only ever touches profiles this
  * app seeded itself; user-managed profiles are left untouched. On reseed the
@@ -296,17 +494,47 @@ function profileAction(profileDir, stamp) {
  * are replaced, cordis.patch.yml* files are kept.
  */
 function applyProfileSeed(seedDir, profileDir, action, stamp, extra) {
-  const keep = (name) => name.startsWith('cordis.patch.yml');
+  for (const directory of [path.dirname(profileDir), profileDir]) {
+    let stat;
+    try {
+      stat = fs.lstatSync(directory);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`profile seed: target is not a local directory: ${directory}`);
+    }
+  }
+  const keep = (source) => path.resolve(path.dirname(source)) === path.resolve(seedDir) &&
+    path.basename(source).startsWith('cordis.patch.yml');
   if (action === 'reseed') {
+    // Electron's recursive rm can follow junctions into shared host packages,
+    // even via original-fs. Inspect each entry with native lstat and unlink
+    // links directly; never descend into their targets.
+    const removalFs = process.versions.electron ? require('original-fs') : fs;
+    const removeEntry = (target) => {
+      let stat;
+      try { stat = removalFs.lstatSync(target); } catch (error) {
+        if (error.code === 'ENOENT') return;
+        throw error;
+      }
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        removalFs.unlinkSync(target);
+        return;
+      }
+      for (const name of removalFs.readdirSync(target)) removeEntry(path.join(target, name));
+      removalFs.rmdirSync(target);
+    };
     for (const name of ['node_modules', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']) {
-      fs.rmSync(path.join(profileDir, name), { recursive: true, force: true });
+      removeEntry(path.join(profileDir, name));
     }
   }
   fs.mkdirSync(profileDir, { recursive: true });
   fs.cpSync(seedDir, profileDir, {
     recursive: true,
     dereference: true,
-    filter: (source) => action !== 'reseed' || !keep(path.basename(source)),
+    filter: (source) => action !== 'reseed' || !keep(source),
   });
   const marker = { stamp, seededAt: new Date().toISOString(), ...extra };
   fs.writeFileSync(path.join(profileDir, SEED_MARKER), JSON.stringify(marker, null, 2) + '\n');
@@ -389,7 +617,19 @@ async function waitForGui(port, options) {
   const deadline = Date.now() + options.deadlineMs;
   for (;;) {
     if (!options.isAlive()) throw new Error('the dsh host process exited before the GUI became ready');
-    if (await probeGui(url, 1500)) return;
+    if (await probeGui(url, 1500)) {
+      if (!options.getTokenUrl) return;
+      const tokenUrl = options.getTokenUrl();
+      if (tokenUrl) {
+        const endpoint = new URL(tokenUrl);
+        if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1'
+          || endpoint.port !== String(port) || endpoint.username || endpoint.password
+          || !endpoint.searchParams.get('token')) {
+          throw new Error('the dsh host published an unexpected GUI endpoint');
+        }
+        return tokenUrl;
+      }
+    }
     if (Date.now() > deadline) throw new Error(`timed out after ${Math.round(options.deadlineMs / 1000)}s waiting for ${url}`);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
   }
@@ -431,14 +671,20 @@ module.exports = {
   DESKTOP_PORT_BASE,
   DESKTOP_PORT_SPAN,
   SEED_MARKER,
+  EXPECTED_WEB_FAMILY_ROWS,
+  WEB_FAMILY_ROWS_0411,
+  activeWebFamilyRows,
+  hasCompleteWebFamily,
   RUNTIME_STAMP,
   resolveRuntimePaths,
   resolveDshHome,
   resolveProfileName,
+  profileSeedStamp,
   childEnv,
   isProgrammaticLaunch,
   readStampFile,
   profileAction,
+  isDesktopSeededProfile,
   applyProfileSeed,
   probeGui,
   findFreePort,
@@ -448,5 +694,6 @@ module.exports = {
   parseTokenUrlLine,
   parseShasums,
   ensureProfileFallbacks,
+  ensureFrameworkCohort,
   checkVcRuntime,
 };
