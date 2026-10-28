@@ -1,0 +1,99 @@
+# 桌面更新与回滚（2026-10-10）
+
+## 0.1.3 官方内核升级
+
+当前源码目标为桌面 0.1.3，内置官方 Harness 0.2.0-rc.2、Web 插件家族 0.4.5，仍是通用编程桌面端。RC2 原生 Git Graph 已支持工作区自动隔离；本地插件适配新版 SettingsForms、附件和 Typert 通信接口。旧连接设置由旧 settings.yaml 或其 .imported 文件导入新的用户配置，并保持原凭据存储。
+
+官方会话格式由 V3 变为 V4，旧内核无法读取新版写入的会话。默认更新清单对旧 0.1.2 先提供 0.1.3-bridge.1（保留旧内核、装入受保护的更新器），新版更新器才选择清单 upgrades 中的 0.1.3。更新前完整快照应用 home 与 Electron userData；外部共享技能链接保留且不复制外部库，更新助手在数据目录外运行。新内核启动前核对快照身份，旧更新器直接跳过准备版的请求会被拒绝。启动失败恢复旧程序和旧数据；手动回滚先保存新版数据，再恢复旧快照。
+
+已完成 137 项插件测试、真实新内核窗口 11 个子插件且无降级、准备版窗口 13 个子插件且无降级。左下角更新按钮突出显示、点击确认和取消不下载已实测。真实官方持久化与实际更新 worker 已验证失败恢复、V3→V4 写入及手动回滚保留 V4 副本；该交易测试使用模拟应用壳，打包 Electron 启动另行实测。首次引导升级的保护字段及失败恢复已通过 9 项回归测试。
+
+本机已通过实际旧 0.1.2 更新器先升级至准备版，再由受保护的新更新器升级至 0.1.3。新内核窗口和宿主健康检查通过；独立复核确认原子切换前快照中的 7 个会话文件逐字节保留、3 个连接按规范化后的设置语义一致、凭据与 hooks 不变、共享技能链接及原卸载程序不变，注册表及 EXE 版本为 0.1.3。旧程序和完整数据快照保留。初始验证脚本在旧窗口还运行时过早采集会话基线，旧窗口在准备期间的保存触发了误报；已改为使用旧窗口退出后、原子切换前的快照核对，独立复核通过。
+
+证据位于 dist/kernel-upgrade-0.1.3：desktop-tests-protected-final.txt（141/141）、plugin-tests-final.txt（137/137）、plugin-harness-final.txt、gui-update-entry-verification.json、verification.json（31,549 个 ZIP/NSIS 文件完整校验）、real-session-migration-verification.json、real-updater-transaction-verification.json、bootstrap-guard-tests-passed.txt、personal-kernel-independent-check.json。本机升级已完成。后续章节保留 0.1.2 历史实测结果。
+
+准备版 [v0.1.3-bridge.1](https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/tag/v0.1.3-bridge.1) 与内核版 [v0.1.3](https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/tag/v0.1.3) 已按授权公开发布，Release ID 分别为 408876123 和 408878740。源码提交分别为 `7012c92e9ec39bb05ea40c98c747ab363ac009e8`、`d00f03f0c7b48c24c71d6abef07b1069741194ac`；只推送两个版本标签，主分支和原暂存区保持不变。默认清单已匿名读取并核对摘要，实际旧更新器得到准备版，新更新器在准备版得到 0.1.3，当前 0.1.3 返回无需更新。公开页面和完整 ZIP 匿名下载结果以 published-release-verification.json 为准；匿名 API 当次限流不影响清单及直接下载，十项资产元数据在发布阶段已逐项核对。
+
+两个完整 ZIP 已匿名下载并校验通过：准备版 412,630,385 字节、SHA-256 `6d804ed67c5bc0a420158ce3f82a24f3894938b5e12af1c1e061f55aacf841b7`；内核版 416,597,968 字节、SHA-256 `b9e1139140e8ff8efe55b7872ef99b721da44a9e118f38d7d22b9c760761975f`。结果与本地验证成品一致，默认 latest 页面及清单可公开访问。最终记录为 published-release-verification.json，passed 为 true。
+
+当前桌面修复包为 0.1.2，内置 Harness 保持已适配的 0.1.5-rc.3。Harness 原有的 GUI 左下角更新按钮现接入桌面更新：平时显示当前桌面版本，发现新版后突出显示；点击查看版本及说明，确认后才下载，准备完成后再次确认安装和重启。菜单可检查更新、恢复上一版或修改更新源，也可以关闭启动时检查。
+
+更新清单属于本桌面发行版，默认地址为本仓库 GitHub Release 的 `desktop-update.json`。它不读取 npm 最新版，不放宽插件版本门。维护脚本只保留读取本地版本的 `--check`；旧无参、自动升级、插件升级和仅 host 回滚均返回错误。
+
+## 0.1.2 侧栏更新入口修复
+
+此前 0.1.1 的原生桌面更新角标与 Harness 自带的左下角更新按钮并存，用户点击后者仍可能看到 pnpm 更新流程。0.1.2 将固定版本的 web 组件接入 Electron 的 `getState`、`onState`、`open` 桥，由同一桌面确认窗口控制下载与安装；原生角标仅在旧版或自定义 web 界面没有接入该按钮时显示。桌面宿主的旧更新状态接口仍返回 HTTP 200，但标记为 `mode: desktop`、`outdated: false`；旧执行接口返回 HTTP 409 `desktop-managed`，阻止从桌面侧栏执行 pnpm。普通 CLI 与浏览器环境保留原行为。
+
+实际打包 GUI 验证确认原左下角按钮接入、备用角标隐藏、13 个子插件健康且无降级；模拟可用版本时按钮高亮、点击打开桌面更新确认窗口，选择“稍后”时没有下载。发布前默认线上清单缺失时，检查结果为“更新源尚未提供更新清单”，按钮不高亮；这是当时的缺失场景验证。记录见 `dist/update-entry-fixed-0.1.2/gui-update-entry-verification.json`。Chromium 网络请求改为逐跳检查地址后主动跟随，真实 Electron 测试通过三次安全重定向，并拒绝超出上限、跳到 HTTP 或带 URL 凭据的地址。
+
+0.1.2 的 `dist/update-entry-fixed-0.1.2` 成品已核对 43,557 个 ZIP/NSIS 条目 CRC、14 个 ZIP 关键文件、6 个 NSIS 改动文件及源码与包内接线一致性。桌面测试 `node --test --test-concurrency=1 tests/*.test.mjs` 为 123/123，无跳过；原始输出见该目录的 `desktop-tests.txt`。
+
+本机个人安装随后从 0.1.1 升至 0.1.2：旧进程自行退出后，更新助手核对并切换完整应用目录，启动新版且通过宿主健康检查。助手退出后新版 GUI 进程仍在，EXE 产品版本为 0.1.2.0、`app.asar` SHA-256 与最终成品一致、注册表显示版本为 0.1.2，桌面快捷方式目标和参数保持不变。5 个受保护配置文件 SHA-256 未变，5 个会话文件逐字节一致，共享技能联接未变；旧程序整树保存在 `C:\Users\Administrator\AppData\Local\Programs\.dsh-previous-fe0e5735-1957-4a28-b427-276702f87a82`。交易记录与独立复核分别见 `dist/update-entry-fixed-0.1.2/personal-update-repair.json` 和 `personal-repair-independent-check.json`。该本机升级使用经校验的完整包自动替换，用户没有手动解压。
+
+## 实现
+
+- HTTPS 获取元数据；Windows x64 ZIP 的大小及 SHA-256 必须一致。
+- 解压前检查 ZIP 本地/中央目录一致性、路径越界、Windows 文件名别名、重复条目、链接及展开大小；解压后拒绝目录链接和特殊文件。
+- 校验 EXE、app.asar 的包名和版本、Node 与 host 入口，保存完整暂存树摘要。切换前再次检查摘要。
+- 解压后的校验与完整树哈希由独立 Node 进程执行，避免阻塞窗口；有上限的并行读取保留原摘要格式，仍拒绝目录链接。助手就绪等待上限为 30 分钟，新版启动健康验证上限为 20 分钟。
+- 独立复制 Node 和更新助手到应用外，持有旧进程的原始 Windows 句柄；助手准备完成后才退出应用。完整目录在同卷切换，不混合覆盖文件。
+- 更新后的启动等待本次宿主输出同端口的带令牌地址，最多等待 15 分钟；HTTP 提前响应不能视为插件加载完成。输出按完整行读取，支持跨数据块的地址。新版 GUI 加载、宿主健康与插件清单通过后才确认成功；启动失败则停止本次新进程、恢复整个旧目录并重新启动。个人 home 和 Electron 数据位于切换目录之外。
+- 更新期间宿主带有本次 nonce 标记。Electron 崩溃后，助手核对父进程、可执行文件、完整标记和创建时间，并固定原始 Windows 进程句柄后才终止遗留宿主，避免它占住新目录。未匹配的进程保留。Windows 的新窗口和恢复窗口分离启动，可在助手退出后继续运行。
+- 已安装的卸载器保留到新目录。ZIP 更新后的系统“应用和功能”DisplayVersion 暂未同步；应用显示版本来自实际包。
+- 保留经验证的上一版目录及摘要，菜单恢复前再次核验。失败尝试不覆盖最后成功版本的恢复记录。
+- 进程正常退出或由信号终止均可进入恢复；协作退出请求绑定本次 nonce 和 PID，并在退出后清除。连续失败不会复用旧请求。损坏的渠道设置和恢复记录会报错；当前版本与成功更新记录不匹配时拒绝恢复。
+- 恢复旧 GUI 前后发布一次回滚结果；随后的大目录清理只更新本任务诊断，不重复写全局结果，防止覆盖恢复窗口启动的下一轮更新。
+
+## 既有更新框架与回滚验证（0.1.1 阶段）
+
+`node --test --test-concurrency=1 tests/*.test.mjs`：114/114，通过，无跳过。原始输出位于 `dist/desktop-updates-verified/desktop-tests-release-final-cache.txt`。回归覆盖 HTTP 已响应但宿主尚未就绪、错误端口的令牌地址、等待超时及宿主提前退出；首次迁移的备份、恢复、安全停止和同路径切换后的旧 `app.asar` 身份缓存也有专项测试。
+
+包括实际 Windows 进程句柄等待、完整文件树切换、新版失败后的旧树恢复和重启；真实 NSIS 短路径、Unicode 长路径、锁文件迁移恢复、目录链接拒绝；真实损坏包和锁文件解压返回错误。解压夹具的 15 秒等待上限不足，改为 60 秒后全部通过，失败码和文件内容断言继续执行。尚未断言超时原因是安全软件或磁盘性能。
+
+新增真实进程测试覆盖信号终止、连续两次协作退出、安装目录内映射的遗留 Node 宿主清理，以及同父、同 EXE 的未标记进程保留。网络请求在 Electron 中使用 [Chromium 网络栈](https://www.electronjs.org/docs/latest/api/net)，沿用系统代理；每次重定向仍核验协议和地址。
+
+审查发现旧回滚任务清理结束后会重复写全局状态，可能覆盖后来成功的更新。回归测试先复现覆盖，再验证修复；独立复核和更新助手 11/11 测试均通过，清理诊断继续保留在本任务记录。
+
+以下表格保留此前 0.1.1 更新框架的隔离验证；内置 runtime 使用同一已验证的 rc.3 包。表内 0.1.2、0.1.3、0.1.4 是当时的夹具版本号，与本次真实 0.1.2 修复包是不同的测试对象；0.1.4 额外注入宿主启动后崩溃。
+
+| 场景 | 结果 |
+| --- | --- |
+| 完整程序 0.1.2 → 0.1.3 | 自身令牌地址、GUI、无降级插件及 13 个子插件通过；助手退出后新 GUI 继续运行 |
+| 0.1.4 在真实宿主启动后退出 | 精确停止带本次标记的遗留宿主，恢复 0.1.3 整个目录并重新打开旧 GUI；新版独有文件消失 |
+| 手动恢复 0.1.3 → 0.1.2 | 原备份校验、目录切换及启动通过；助手退出后旧 GUI 继续运行 |
+| 完整恢复树及个人数据 | 自动恢复树与更新前候选树 SHA-256 一致；手动恢复树与最初旧树 SHA-256 一致；home 与 Electron 数据哨兵均保留 |
+
+原始运行记录：`dist/desktop-updates-verified/actual-recovery-detached.txt`。完整证据：`actual-update-rollback.json`，额外目录摘要核对：`complete-tree-recovery.txt`，均位于同一验证目录。测试 GUI、宿主及助手已退出。实际 Electron 中还验证过完整 ZIP 下载、解压及后台校验；拒绝下载时服务端下载计数为零，准备完成选择稍后时当前 GUI 保持运行。左下角高亮截图为该目录的 `desktop-update-badge.png`。
+
+旧的 runtime 合并覆盖快照已移除。历史 0.1.1 ZIP 与 NSIS 已核对源码与包内更新模块、全部 ZIP/NSIS 条目 CRC；43,557 个文件条目一致。成品目录为 `dist/desktop-updates-verified`，校验记录 `verification.json`、`SHA256SUMS.txt`，更新清单 `desktop-update.json` 与该 ZIP 大小及 SHA-256 一致。该候选包未公开发布，已由上文的 0.1.2 成品取代。0.1.1 安装包签名状态实查为 `NotSigned`，记录为 `signature-status.json`。
+
+## 旧版首次迁移
+
+0.1.0 未内置更新入口。历史首次迁移使用当时的 `scripts/bootstrap-installed-desktop.mjs`，先核对现有安装身份及经验证的 0.1.1 ZIP、NSIS 文件哈希；原安装无运行进程且个人数据在快照后未改变时，才在原安装路径切换完整程序目录。原桌面快捷方式继续指向同一路径。工具从经校验的 NSIS 成品提取新版卸载器，不执行旧版卸载器。当前脚本仍只接受 0.1.0 作为来源，但目标已固定为 0.1.2；不能用当前版本直接复现下方的 0.1.1 历史记录。
+
+引导前备份完整 `DSH_HOME` 和 Electron 用户数据，用户数据中的 `desktop-updates` 任务缓存除外。备份保留链接本身，不递归复制或删除其外部目标。Windows 下通过不跟随目标的原生元数据查询区分目录联接、目录符号链接与文件符号链接；修复了目标暂时不存在时的类型误判，以及 PowerShell 5 无法读取超过 260 字符路径的问题。专项快照测试 7/7 通过，原始输出见 `dist/desktop-updates-verified/bootstrap-snapshot-final.txt`。若首次启动失败，恢复程序先恢复个人数据，再启动旧程序。成功后保留原应用目录和数据备份，并单独记录引导结果；0.1.0 不支持新版启动确认协议，因此不能作为菜单中普通的“恢复上一个版本”目标。
+
+隔离的完整 0.1.0 运行时与最终 0.1.1 包已通过两次真实应用引导：一次使新版启动失败，确认旧程序整树摘要完全还原、个人数据先于旧版重启恢复、外部技能联接目标保留；另一次确认新版 GUI、宿主与 13 个子插件健康，更新助手结束后窗口继续运行。旧版夹具仅在私有 `app.asar` 中补入验证用用户数据隔离；结果见 `dist/desktop-updates-verified/legacy-bootstrap-verification.json`。
+
+本机原有 0.1.0 安装随后在原路径自动迁移至 0.1.1，结果为 `succeeded`。原桌面快捷方式目标与共享技能联接保持不变，系统“应用和功能”显示版本更新为 0.1.1，新 GUI 在助手退出后继续正常运行。原程序整树与完整个人数据快照均保留；未执行旧版卸载器。对原有 133 个非 Profile 个人文件的核对中，127 个逐字节一致，1 个会话 JSON 内容等价但格式或键顺序变化，5 个运行状态文件刷新；另有 2 个用户 `cordis.patch.yml` 文件逐字节一致。原始记录：`dist/desktop-updates-verified/personal-migration-verification.json`。
+
+旧程序目录保存在 `C:\Users\Administrator\AppData\Local\Programs\.dsh-previous-7ea97b36-8733-408e-91d5-6947297790d2`；个人数据快照保存在 `C:\Users\Administrator\.dsh-desktop-bootstrap-backups\dsh-desktop-bootstrap-7ea97b36-8733-408e-91d5-6947297790d2`。两处均已核对存在；首次引导记录与日常菜单回滚记录分开保存。
+
+## 发布边界
+
+本地构建和测试不会发布 GitHub Release。线上渠道需同时上传完整 Windows ZIP 和根据实际 ZIP 生成的 `desktop-update.json`。本机 0.1.0 的历史首次迁移由当时的维护者工具执行；0.1.1 起具备桌面更新逻辑，0.1.2 将 Harness 原左下角按钮接入该逻辑。历史 0.1.0 NSIS 卸载器带有删除个人目录的旧逻辑，不能用应用内 ZIP 更新或引导工具的结果推断传统 NSIS 覆盖安装安全。
+
+维护者在仓库根目录运行以下预检；准备版与内核版各核对五项成品，内核版同时核对准备版下载路线。只读取本地文件，不请求 Git 凭据或修改 GitHub：
+
+```sh
+node scripts/publish-desktop-release.mjs --plan --version 0.1.3-bridge.1 --release-dir dist/updater-bridge-0.1.3-bridge.1
+node scripts/publish-desktop-release.mjs --plan --version 0.1.3 --release-dir dist/kernel-upgrade-0.1.3 --bridge-dir dist/updater-bridge-0.1.3-bridge.1
+```
+
+预检逐一核对 ZIP、NSIS、`desktop-update.json`、`SHA256SUMS.txt` 和发布说明，并要求清单中的版本、下载 URL、ZIP 字节数及 SHA-256 与已验证成品一致。发布工具的 14 项离线测试覆盖标签与批准提交不一致、上传失败、资产摘要缺失、续传草稿和请求超时；`node --test tests/release-publication.test.mjs` 已实跑 14/14 通过。这些测试使用模拟的 GitHub 响应，不证明线上发布成功。
+
+v0.1.2 已按授权公开发布：[GitHub Release](https://github.com/wangzhiguan72-droid/dsh-mathmodel-desktop/releases/tag/v0.1.2)，Release ID 为 `407793212`。远端标签解析到与已验证成品对应的源码提交 `7c1a31e89d1582b73bb8fa20f67e595c23b833d2`。发布工具先建立草稿，上传并核对五项文件的大小和 SHA-256，再复查标签与草稿身份后公开为最新版本。匿名读取已确认最新 Release 和默认地址的 `desktop-update.json` 存在，清单 HTTP 200 且内容摘要与本地一致；完整线上 ZIP 匿名下载得到 412,623,342 字节，SHA-256 `d2646e913bf8d80b63534efd8322b76303ef54c65b0384b37038d68615fb79a2`，与本地最终成品一致。实际 Electron 从默认地址检查到 0.1.2：旧版能识别新版，本机已安装的 0.1.2 返回最新状态。发布与完整下载记录见 `dist/update-entry-fixed-0.1.2/published-release-verification.json`；Electron 记录见同目录的 `published-channel-electron.json`。
+
+发布前的历史状态：2026-10-08 读取 GitHub 时最新为 v0.1.0，未附 `desktop-update.json`，见 `dist/desktop-updates-verified/release-access.json`；2026-10-06 默认清单地址返回 HTTP 404，见同目录的 `channel-status.json`。0.1.1 候选包未发布。这些记录解释此前的缺失清单提示，不代表当前 v0.1.2 渠道状态。后续如需让 0.1.2 用户看到更新，维护者还须构建、验证并发布更高版本，用户再在左下角决定是否下载和安装。
+
+下载完整性使用 HTTPS 与清单 SHA-256；本项目尚无代码签名或独立签名密钥。NSIS 原版本卸载器参与的安装覆盖升级，与上述应用内 ZIP 更新为不同路径，不能用本项结果代替所有历史版本覆盖安装测试。

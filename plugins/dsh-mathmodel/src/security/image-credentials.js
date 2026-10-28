@@ -1,7 +1,7 @@
 import { isValidConnectionId } from './image-connections.js';
-import { safeError } from './redact.js';
 
 const REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const providerFailure = () => new Error('生图凭据服务操作失败');
 
 /**
  * 只允许由已存在的 connectionId 派生 `MATHMODEL_IMAGE_<ID>` 引用；
@@ -26,13 +26,17 @@ export class ImageConnectionCredentialStore {
   async describe(id) {
     this.assertConnection(id);
     const ref = this.refFor(id);
-    const info = await this.provider.describe(ref);
-    return Object.freeze({
-      ref,
-      configured: info.configured === true,
-      writable: info.writable === true,
-      ...(typeof info.source === 'string' ? { source: info.source } : {}),
-    });
+    try {
+      const info = await this.provider.describe(ref);
+      return Object.freeze({
+        ref,
+        configured: info.configured === true,
+        writable: info.writable === true,
+        ...(typeof info.source === 'string' ? { source: info.source } : {}),
+      });
+    } catch {
+      throw providerFailure();
+    }
   }
 
   async set(id, value) {
@@ -41,26 +45,34 @@ export class ImageConnectionCredentialStore {
     const ref = this.refFor(id);
     try {
       await this.provider.set(ref, value);
-    } catch (error) {
-      throw safeError(error, [value]);
+      return await this.describe(id);
+    } catch {
+      throw providerFailure();
     }
-    return await this.describe(id);
   }
 
   async clear(id) {
     this.assertConnection(id);
-    await this.provider.unset(this.refFor(id));
-    return await this.describe(id);
+    try {
+      await this.provider.unset(this.refFor(id));
+      return await this.describe(id);
+    } catch {
+      throw providerFailure();
+    }
   }
 
   async resolve(id) {
     this.assertConnection(id);
     const ref = this.refFor(id);
-    const info = await this.provider.resolve(ref);
-    return {
-      ref,
-      value: typeof info?.value === 'string' ? info.value : '',
-      source: typeof info?.source === 'string' ? info.source : 'managed',
-    };
+    try {
+      const info = await this.provider.resolve(ref);
+      return {
+        ref,
+        value: typeof info?.value === 'string' ? info.value : '',
+        source: typeof info?.source === 'string' ? info.source : 'managed',
+      };
+    } catch {
+      throw providerFailure();
+    }
   }
 }

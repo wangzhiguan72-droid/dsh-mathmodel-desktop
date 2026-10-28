@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "purpose": "First complete real-provider capability acceptance, then measure a bounded cache/cost/quality pilot.",
+  "authorization": "User explicitly requested real model requests, completion of stage two, then stage three.",
+  "target": "Bundled official Host in a temporary synthetic workspace; existing DeepSeek official credential reference only.",
+  "primaryMetric": { "name": "estimated CNY per correct synthetic answer", "direction": "lower", "unit": "CNY", "guard": "Objective exact JSON equality; report failures and unknown costs." },
+  "secondaryMetrics": ["actual cache-read tokens", "cache-read share when all prompt buckets are known", "provider first-text latency", "turn latency", "tool schema hash stability"],
+  "model": { "provider": "deepseek-official", "requestedModel": "deepseek-flash", "thinking": "off", "accounting": "Use observed response model and usage; never infer cache hits from identical hashes." },
+  "stageTwo": ["unconfirmed prompt blocked before provider", "real file read with Skills absent", "real Skill invocation and file read", "first-turn preset lock", "Host mutation refused", "drifted prompt blocked before provider", "restored configuration produces real answer"],
+  "stageThree": {
+    "arms": ["task-00", "task-0f"],
+    "samplesPerArm": 5,
+    "sequence": ["observed warmup", "identical repeat", "identical repeat", "changed tail: accounting", "changed tail: stable deduplication"],
+    "questions": 3,
+    "syntheticReferenceRows": 180,
+    "intervalMs": 3000,
+    "order": "blocked by arm, task-00 then task-0f; report this order limitation",
+    "temperature": "not changed; no deterministic-output or statistical-significance claim",
+    "coldCache": "unknown; first observed request is not asserted cold"
+  },
+  "limitsPerRun": { "providerRequests": 24, "outputTokensPerRequest": 1024, "turnTimeoutMs": 120000, "stageThreeTurns": 10 },
+  "followupV2": { "reason": "Both arms returned the correct stable-deduplication values under different property names (answer or key_values), rather than values. Preserve both original strict failures and test an explicit JSON property name.", "intendedChange": "Question wording; fixed expected values remain unchanged.", "environmentalDifference": "A new isolated workspace is created. Its path and system prefix also change, so this is not a single-variable cache or causal-quality experiment.", "samplesPerArm": 1, "command": "node scripts/live-capability-benchmark.mjs --run --stage=3 --clarify-format", "doNotPoolWithInitialScores": true },
+  "protected": ["personal installed profile", "personal projects", "all non-DeepSeek credential references", "synthetic expected answers"],
+  "secrets": "No headers, credential values, or raw authentication errors in receipts. Remove the temporary credential file in finally.",
+  "retention": "Keep failed and successful receipts separately; do not replace failed evidence with a corrected result.",
+  "audit": { "version": 2, "completeOnlyAfter": ["final message_delta output usage", "message_stop", "four valid token counters"], "attribution": "Wait for all in-flight audit records to settle and persist before each turn boundary.", "legacyPolicy": "Keep original receipts and provisional summaries; incomplete terminal observation means unknown cost and unverified cache aggregates. Rerun with v2 for formal measurement." },
+  "stop": "Stop on stage-two acceptance failure, request/output budget, unresolved permission, transport failure, or timeout. Do not start stage three until stage two passes.",
+  "scopeLimit": "Small synthetic pilot measures these requests only. It does not establish engineering-task success, general modeling quality, an account bill, or a universal speed/cost improvement.",
+  "pricingSources": ["https://api-docs.deepseek.com/zh-cn/quick_start/pricing/", "https://api-docs.deepseek.com/guides/kv_cache/", "https://api-docs.deepseek.com/guides/anthropic_api/"]
+}

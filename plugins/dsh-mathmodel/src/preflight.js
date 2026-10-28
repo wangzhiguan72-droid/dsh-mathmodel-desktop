@@ -108,7 +108,10 @@ export class PreflightService {
   }
 
   async #command(definition) {
-    const located = await locateDependency(definition, this.locate, this.runProcess, this.env);
+    const candidates = definition.id === 'drawio' && WINDOWS && this.env.LOCALAPPDATA
+      ? [...definition.candidates, join(this.env.LOCALAPPDATA, 'Programs', 'draw.io', 'draw.io.exe')]
+      : definition.candidates;
+    const located = await locateDependency({ ...definition, candidates }, this.locate, this.runProcess, this.env);
     const { path, source } = located;
     if (!path) return { id: definition.id, label: definition.label, status: 'missing', path: null, version: null, guidance: definition.guidance };
     const result = await this.runProcess(path, definition.args, { timeoutMs: 8000 });

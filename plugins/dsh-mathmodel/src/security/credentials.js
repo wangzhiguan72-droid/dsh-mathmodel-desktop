@@ -1,5 +1,3 @@
-import { safeError } from './redact.js';
-
 export const CREDENTIAL_ALLOWLIST = Object.freeze([
   'DASHSCOPE_API_KEY',
   'OPENAI_API_KEY',
@@ -7,6 +5,7 @@ export const CREDENTIAL_ALLOWLIST = Object.freeze([
   'CUSTOM_IMAGE_API_KEY',
 ]);
 const ALLOWED = new Set(CREDENTIAL_ALLOWLIST);
+const providerFailure = () => new Error('凭据服务操作失败');
 
 function assertRef(ref) {
   if (!ALLOWED.has(ref)) throw new TypeError(`不允许管理凭据引用：${ref}`);
@@ -29,7 +28,11 @@ export class CredentialFacade {
 
   async describe(ref) {
     assertRef(ref);
-    return publicInfo(ref, await this.provider.describe(ref));
+    try {
+      return publicInfo(ref, await this.provider.describe(ref));
+    } catch {
+      throw providerFailure();
+    }
   }
 
   async describeAll() {
@@ -42,14 +45,18 @@ export class CredentialFacade {
     try {
       await this.provider.set(ref, value);
       return await this.describe(ref);
-    } catch (error) {
-      throw safeError(error, [value]);
+    } catch {
+      throw providerFailure();
     }
   }
 
   async unset(ref) {
     assertRef(ref);
-    await this.provider.unset(ref);
-    return await this.describe(ref);
+    try {
+      await this.provider.unset(ref);
+      return await this.describe(ref);
+    } catch {
+      throw providerFailure();
+    }
   }
 }

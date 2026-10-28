@@ -1,16 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Context } from '@deepseek-ai/cordis';
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol';
 import { TYPERT } from '../lib/typert.host.js';
 import { TYPERT_REMOTE } from '../lib/typert.remote-client.js';
-import { validateTypertManifest } from '../../../.dsh/profiles/node_modules/@deepseek-ai/dsh-typert-loader/lib/index.js';
+import { MathmodelCardsGateway } from '../lib/host.js';
+import { MathmodelHostCapabilitiesGateway } from '../src/host-capabilities.js';
 
-test('Host Typert 清单通过官方 Harness 校验器', () => {
-  const validated = validateTypertManifest('@deepseek-harness/dsh-mathmodel', TYPERT);
-  assert.equal(validated.invocations.length, 20);
-  assert.deepEqual(
-    new Set(validated.invocations.map((item) => item.namespace)),
-    new Set(['mathmodelCards', 'mathmodelCredentials', 'mathmodelPreflight', 'mathmodelProviders', 'mathmodelImageConnections', 'mathmodelOpenCodeRt', 'mathmodelStoredKeyModelDiscovery', 'mathmodelManualVision']),
-  );
+test('新版 Cordis 与 Typert 实际注册卡片 Remote 并执行调用', async () => {
+  const ctx = new Context();
+  const cards = {
+    list: async () => ['card'],
+    help: async () => ({ title: 'help' }),
+    render: async () => ({ text: 'draft' }),
+  };
+  const gateway = new MathmodelCardsGateway(ctx, cards);
+  assert.equal(ctx.get('mathmodelCards').name, 'mathmodelCards');
+  assert.deepEqual(remoteMethods(gateway).map((entry) => entry.method), ['list', 'help', 'render']);
+  assert.deepEqual(await gateway.list(), ['card']);
+  assert.deepEqual(await gateway.render(), { text: 'draft' });
 });
 
 test('Client 与 Host Remote 端点完全一致', () => {
@@ -18,6 +26,14 @@ test('Client 与 Host Remote 端点完全一致', () => {
     TYPERT_REMOTE.descriptors.map((item) => item.id),
     TYPERT.invocations.map((item) => item.id),
   );
+});
+
+test('Host 快照 Remote 在真实 Cordis 中注册 describe 与 confirm', async () => {
+  const ctx = new Context();
+  const gateway = new MathmodelHostCapabilitiesGateway(ctx, { describe: async id => ({ id }), confirm: async (...args) => args });
+  assert.deepEqual(remoteMethods(gateway).map(entry => entry.method), ['describe', 'confirm', 'describeTools', 'setTools', 'selectModel']);
+  assert.deepEqual(await gateway.describe('s1'), { id: 's1' });
+  assert.deepEqual(await gateway.confirm('s1', 'task-05', 'digest'), ['s1', 'task-05', 'digest']);
 });
 
 test('浏览器 bundle 的 Remote 签名与 Host 清单一致', async () => {

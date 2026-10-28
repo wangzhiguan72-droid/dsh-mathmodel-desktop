@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>桌面更新设置</title>
+<style>body{font:14px system-ui;color:#dae4f3;background:#101827;margin:28px}label{display:block;margin:18px 0 8px}input[type=url]{box-sizing:border-box;width:100%;padding:10px;border:1px solid #435068;border-radius:7px;background:#182337;color:inherit}button{padding:9px 20px;border:0;border-radius:7px;background:#e9b751;color:#172032;cursor:pointer}p{line-height:1.6;color:#a8b6cc}#status{min-height:22px}</style>
+<h2>桌面更新</h2>
+<p>只从你配置的桌面发行渠道检查新版本。下载和安装均需你确认。</p>
+<label for="feed">发行渠道地址（HTTPS）</label><input id="feed" type="url">
+<label><input id="auto" type="checkbox"> 打开应用时检查更新</label>
+<p id="status" role="status"></p><button id="save">保存设置</button>
+<script>
+const feed=document.getElementById('feed'),auto=document.getElementById('auto'),status=document.getElementById('status');
+window.updateSettings.get().then(value=>{feed.value=value.feedUrl;auto.checked=value.autoCheck});
+document.getElementById('save').onclick=async()=>{try{await window.updateSettings.save({feedUrl:feed.value,autoCheck:auto.checked});status.textContent='已保存。下次检查将使用此渠道。'}catch(error){status.textContent=error.message}};
+</script></html>

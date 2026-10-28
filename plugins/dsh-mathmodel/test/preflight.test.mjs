@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join, resolve } from 'node:path';
 import { PreflightService } from '../lib/index.js';
+
+test('Windows 用户安装的 Draw.io 不需要加入 PATH 即可发现', { skip: process.platform !== 'win32' }, async () => {
+  const localAppData = resolve('fixture-local-appdata');
+  const drawio = join(localAppData, 'Programs', 'draw.io', 'draw.io.exe');
+  const service = new PreflightService({
+    env: { LOCALAPPDATA: localAppData },
+    locate: async (names, candidates) => names.includes('draw.io') && candidates.includes(drawio) ? drawio : null,
+    run: async () => ({ ok: true, code: 0, stdout: 'fixture-version', stderr: '', error: null }),
+  });
+  const report = await service.run();
+  const item = report.items.find((entry) => entry.id === 'drawio');
+  assert.equal(item.path, drawio);
+  assert.equal(item.status, 'available');
+});
 
 test('可用夹具稳定覆盖全部必需依赖', async () => {
   const service = new PreflightService({

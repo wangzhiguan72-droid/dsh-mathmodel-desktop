@@ -1,0 +1,159 @@
+{
+  "observedFrom": "live dsh 0.2.1-rc.4 + @linxin666/dsh-web-all 0.4.11 boot (win32), pluginManager/listPlugins, family rows plus one non-family row",
+  "plugins": [
+    {
+      "entryId": "include:web-ui-compat",
+      "moduleName": "@linxin666/dsh-web-all",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-settings",
+      "moduleName": "@linxin666/dsh-client-ui-web-ui-settings",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-plugin-manager",
+      "moduleName": "@linxin666/dsh-client-ui-plugin-manager",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-market",
+      "moduleName": "@linxin666/dsh-client-ui-market",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-task-board",
+      "moduleName": "@linxin666/dsh-client-ui-task-board",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-task-board-github",
+      "moduleName": "@linxin666/dsh-client-ui-task-board-github",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-agents",
+      "moduleName": "@linxin666/dsh-agents",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-git-graph",
+      "moduleName": "@linxin666/dsh-client-ui-git-graph",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-remote-web-ui",
+      "moduleName": "@linxin666/dsh-remote-web-ui",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-update",
+      "moduleName": "@linxin666/dsh-update",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-remote-bridge",
+      "moduleName": "@linxin666/dsh-remote-bridge",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-task-board-remote",
+      "moduleName": "@linxin666/dsh-task-board-remote",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-ssh",
+      "moduleName": "@linxin666/dsh-ssh",
+      "enabled": false
+    },
+    {
+      "entryId": "include:web-ui-liangshen",
+      "moduleName": "@linxin666/dsh-liangshen",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-skill-explorer",
+      "moduleName": "@linxin666/dsh-client-ui-skill-explorer",
+      "enabled": false
+    },
+    {
+      "entryId": "include:web-ui-usage",
+      "moduleName": "@linxin666/dsh-usage",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-session-archive",
+      "moduleName": "@linxin666/dsh-session-archive",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-message-edit",
+      "moduleName": "@linxin666/dsh-client-ui-message-edit",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-win-bash",
+      "moduleName": "@linxin666/dsh-win-bash",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-i18n",
+      "moduleName": "@linxin666/dsh-i18n",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-browser-view",
+      "moduleName": "@linxin666/dsh-client-ui-browser-view",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-community-plugins",
+      "moduleName": "@linxin666/dsh-client-ui-community-plugins",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-pet",
+      "moduleName": "@linxin666/dsh-pet",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-preset-center",
+      "moduleName": "@linxin666/dsh-client-ui-preset-center",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:web-ui-skin-center",
+      "moduleName": "@linxin666/dsh-client-ui-skin-center",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "entryId": "include:mathmodel",
+      "moduleName": "@deepseek-harness/dsh-mathmodel",
+      "enabled": true,
+      "fiberPhase": "active"
+    }
+  ]
+}
