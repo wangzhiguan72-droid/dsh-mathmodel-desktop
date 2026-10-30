@@ -1,4 +1,7 @@
-import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import Schema from '@deepseek-ai/schemastery';
 
 export const ROLES = Object.freeze(['explore', 'implement', 'review', 'escalate']);
 export const WRITE_ROLES = new Set(['implement', 'escalate']);
@@ -110,4 +113,144 @@ export function childGuard(exec) {
   const target = exec.arguments?.file_path;
   if (typeof target !== 'string' || !child.files.has(pathKey(target, child.cwd))) return '该文件不在本次交接的 files 里，不能修改。';
   return undefined;
+}
+
+export const name = 'dsh-handoff';
+export const inject = ['tools', 'subagents', 'systemPrompt', 'workingDirectory'];
+const FLASH = { provider: 'magpie', model: 'workbuddy-ai/deepseek-v4.1-flash' };
+const ASTRA = { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' };
+export const DEFAULT_ROLES = Object.freeze({ explore: FLASH, implement: FLASH, review: ASTRA, escalate: ASTRA });
+const Route = Schema.object({ provider: Schema.string().required(), model: Schema.string().required(), reasoningEffort: Schema.string() });
+export const Config = Schema.object({
+  roles: Schema.object(Object.fromEntries(ROLES.map(role => [role, Route.default(DEFAULT_ROLES[role])]))).default({}),
+  ledgerDir: Schema.string().default('.dsh-handoff'),
+});
+
+export const RULES = [
+  '## 交接子代理（delegate）',
+  '1. 先自己看懂问题，再派活。交接单要能让一个没看过对话的人照着做。',
+  '2. 互不依赖的只读交接放在同一条消息里一起发。',
+  '3. 子代理的回执是报告，不是证据。告诉用户“完成”之前，自己看 diff 或跑 done_when 里写的检查。',
+  '4. 每次 implement 完成后派一次 review。review 的交接单只写需求、相关文件和完成标准，不写自己的判断。',
+  '5. 回执是 unsure / blocked，或者 review 没通过，用 escalate 换强模型重做这一块，或者自己做。不要让 Flash 在同一块上反复重试。',
+].join('\n');
+
+const defaultDeps = {
+  randomUUID,
+  now: () => new Date().toISOString(),
+  appendLine: async (file, row) => { await mkdir(dirname(file), { recursive: true }); await appendFile(file, `${JSON.stringify(row)}\n`, 'utf8'); },
+  readLedger: async file => {
+    try { return (await readFile(file, 'utf8')).split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  },
+};
+const anyObject = { type: 'object', additionalProperties: true };
+
+function renderResult(value) {
+  const head = `[${value.role}] ${value.title} · ${value.status}${value.verdict ? ` · ${value.verdict}` : ''} · 改动 ${value.files_changed.length} 个文件`;
+  const lines = [head, ...(value.violations.length ? [`⚠ 违规：${value.violations.join('；')}`] : []), JSON.stringify(value.receipt, null, 2)];
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+const DELEGATE_PARAMETERS = {
+  type: 'object', additionalProperties: false,
+  required: ['role', 'title', 'goal', 'context', 'files', 'constraints', 'done_when'],
+  properties: {
+    role: { type: 'string', enum: [...ROLES] },
+    title: { type: 'string', description: '3 到 8 个字的显示名' },
+    goal: { type: 'string', description: '这一块要达成什么，一两句话' },
+    context: { type: 'string', description: '子代理需要知道的事实：已经确认的、已经排除的方向。它看不到主对话。' },
+    files: { type: 'array', items: { type: 'string' }, description: '相关文件。implement / escalate 必填，并且只能改这些文件' },
+    constraints: { type: 'string', description: '不能做的事' },
+    done_when: { type: 'string', description: '可检查的完成标准' },
+    escalates: { type: 'string', description: 'escalate 必填：被重做的那次交接的 id' },
+  },
+};
+
+export function apply(ctx, config = {}, deps = defaultDeps) {
+  const roles = { ...DEFAULT_ROLES, ...config.roles };
+  const ledgerFile = cwd => join(cwd, config.ledgerDir ?? '.dsh-handoff', 'ledger.jsonl');
+  const record = async (cwd, row) => {
+    try { await deps.appendLine(ledgerFile(cwd), { ...row, at: deps.now() }); }
+    catch (error) { ctx.logger?.warn?.(`账本写入失败：${error.message}`); }
+  };
+  ctx.tools.guard(childGuard);
+
+  async function delegate(args, exec) {
+    const checked = validateBrief(args);
+    if (!checked.ok) throw new Error(`交接单不完整：${[...checked.missing.map(key => `缺少 ${key}`), ...checked.errors].join('；')}`);
+    const { brief } = checked;
+    const route = roles[brief.role];
+    if (!route?.provider || !route?.model) throw new Error(`角色 ${brief.role} 的模型路线没有配置`);
+    const agentOptions = { provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) };
+    const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal);
+    try { await ctx.get('llm')?.resolveCallConfig(agentOptions, exec.signal); }
+    catch (error) { throw new Error(`角色 ${brief.role} 的模型路线 ${route.provider}/${route.model} 不可用：${error.message}`); }
+    const id = deps.randomUUID();
+    if (WRITE_ROLES.has(brief.role)) {
+      const lock = writeLocks.acquire(id, brief.files, cwd);
+      if (!lock.ok) throw new Error(`文件正被其他交接占用：${lock.conflicts.map(c => `${c.file}（交接 ${c.holder}）`).join('、')}。等它结束，或换一组文件。`);
+    }
+    children.set(id, { role: brief.role, files: new Set(brief.files.map(f => pathKey(f, cwd))), cwd });
+    const end = { kind: 'end', id, status: 'blocked', files_changed: [], violations: [], stopReason: null };
+    let onAbort;
+    try {
+      await record(cwd, { kind: 'start', id, parent: exec.agent?.id, role: brief.role, title: brief.title, brief });
+      const activation = await ctx.subagents.startActivation({
+        provider: 'spawn', label: brief.title, childId: id, signal: exec.signal, delivery: 'caller',
+        request: { cwd, parent: exec.agent, prompt: [{ type: 'text', text: renderBrief(brief, { id }) }], agentOptions, outputSchema: receiptSchema(brief.role) },
+      });
+      onAbort = () => activation.dispose();
+      exec.signal.addEventListener('abort', onAbort, { once: true });
+      const result = await activation.result;
+      const receipt = result?.structured ?? null;
+      Object.assign(end, {
+        status: receipt?.status ?? 'blocked',
+        ...(receipt?.verdict ? { verdict: receipt.verdict } : {}),
+        files_changed: receipt?.files_changed ?? [],
+        violations: receipt ? checkViolation(brief.role, brief, receipt, cwd) : ['回执缺失或不符合格式'],
+        stopReason: result?.stopReason ?? null,
+      });
+      const { kind: _kind, ...summary } = end;
+      return { ...summary, role: brief.role, title: brief.title, receipt, ...(receipt ? {} : { output: result?.output ?? '' }) };
+    } catch (error) {
+      end.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      if (onAbort) exec.signal.removeEventListener('abort', onAbort);
+      writeLocks.release(id);
+      children.delete(id);
+      await record(cwd, end);
+    }
+  }
+
+  ctx.tools.register({
+    name: 'delegate',
+    description: '把一块边界清楚的活交给子代理，等它结束后返回结构化回执。角色：explore 只读探查；implement 只改 files 里的文件；review 独立验收；escalate 用强模型重做之前失败或没把握的交接。互不依赖的交接放在同一条消息里并行发。',
+    parameters: DELEGATE_PARAMETERS,
+    output: { schema: anyObject, render: (_args, value) => renderResult(value) },
+    isConcurrencySafe: () => true,
+    execute: delegate,
+  });
+
+  ctx.tools.register({
+    name: 'handoff_ledger',
+    description: '列出本会话最近的交接（id、角色、标题、状态、违规数）。上下文压缩后用它接上进度。',
+    parameters: { type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 100 } } },
+    output: { schema: anyObject, render: (_args, value) => [{ type: 'text', text: value.handoffs.length
+      ? value.handoffs.map(h => `${h.id} [${h.role}] ${h.title} · ${h.status}${h.violations ? ` · ⚠ ${h.violations}` : ''}`).join('\n')
+      : '本会话还没有交接。' }] },
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const cwd = await ctx.workingDirectory.ensure(exec.agent, exec.signal);
+      const byId = new Map();
+      for (const row of await deps.readLedger(ledgerFile(cwd))) {
+        if (row.kind === 'start' && row.parent === exec.agent?.id) byId.set(row.id, { id: row.id, role: row.role, title: row.title, status: 'running', violations: 0 });
+        else if (row.kind === 'end' && byId.has(row.id)) Object.assign(byId.get(row.id), { status: row.status, violations: row.violations?.length ?? 0 });
+      }
+      return { handoffs: [...byId.values()].slice(-(args?.limit ?? 20)) };
+    },
+  });
+
+  ctx.systemPrompt.section({ name: 'tool:delegate', order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'), text: () => RULES });
 }
