@@ -157,7 +157,7 @@ try {
   const roster = await client.rpc('agentPresets', 'list');
   assert.equal(roster.presets.filter(row => row.id === 'task' && !row.broken).length, 1);
   const sessions = [];
-  for (const row of catalog.catalogs) {
+  for (const row of Array.from({ length: 5 }, () => catalog.catalogs[0])) {
     const created = await client.rpc('session', 'create', { request: { agentPreset: row.id, workspaceId } });
     const projection = await client.rpc('session', 'projections', { request: { sessionId: created.sessionId } });
     assert.equal(projection.values.agentPreset, row.id);
@@ -220,7 +220,7 @@ try {
     coldTargets.push({sessionId:sessions[1].sessionId,preset:sessions[1].preset,kind:'missing-confirmation'});
     for (const [index, overrides, kind] of [
       [2,{hostHash:'0'.repeat(64)},'host-hash'], [3,{globalToolsHash:'0'.repeat(64)},'tools-hash'],
-      [4,{preset:'task'},'preset-mismatch'],
+      [4,{preset:'standard'},'preset-mismatch'],
     ]) {
       const target = sessions[index], p = await client.rpc('mathmodelHostCapabilities','describe',{sessionId:target.sessionId});
       await client.rpc('mathmodelHostCapabilities','confirm',{sessionId:target.sessionId,preset:target.preset,hostHash:p.hostHash});
@@ -235,8 +235,12 @@ try {
   fs.unlinkSync(catalogFile);
   await awaitHost(launchHost());
   const resumedClient = await createInstalledHostClient({ logFile });
-  const resumed = await resumedClient.rpc('session', 'create', { request: { sessionId: sessions[0].sessionId, workspaceId, agentPreset: 'task' } });
-  assert.equal(resumed.sessionId, sessions[0].sessionId);
+  // rc.5: session/create reuses a named Session only while it is blank. A started one becomes live
+  // through any Agent-resolving call; renaming it sends no prompt and calls no model.
+  const resume = sessionId => resumedClient.rpc('session', 'rename', { request: { sessionId, title: 'capability verification' } });
+  await resume(sessions[0].sessionId);
+  const resumed = await resumedClient.rpc('session', 'projections', { request: { sessionId: sessions[0].sessionId } });
+  assert.equal(resumed.values.agentPreset, 'task');
   const restored = await resumedClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId });
   assert.equal(restored.locked, true);
   assert.equal(restored.matches, true);
@@ -245,7 +249,7 @@ try {
   assert.equal(afterRestart.reason, null);
   assert.equal(afterRestart.preStep.kind, 'enter');
   if (negativeChecks) for (const target of coldTargets) {
-    await resumedClient.rpc('session','create',{request:{sessionId:target.sessionId,workspaceId,agentPreset:target.preset}});
+    await resume(target.sessionId);
     const rejected = await control('pre-step',{sessionId:target.sessionId});
     assert.equal(rejected.preStep.kind,'reject',target.kind);
     assert.match(rejected.reason,target.kind === 'missing-confirmation' ? /请先/ : /快照不一致/,target.kind);
