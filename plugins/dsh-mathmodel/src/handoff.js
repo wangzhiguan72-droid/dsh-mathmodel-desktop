@@ -78,3 +78,36 @@ export function checkViolation(role, brief, receipt, cwd) {
   const outside = changed.filter(f => !allowed.has(pathKey(f, cwd)));
   return outside.length ? [`改动超出 files：${outside.join('、')}`] : [];
 }
+
+// ponytail: 进程内全局锁，重启即清空；运行中的子代理也不会跨重启继续写，所以够用。
+export class WriteLocks {
+  #held = new Map(); // pathKey -> handoffId
+  acquire(handoffId, files, cwd) {
+    const keys = files.map(file => [file, pathKey(file, cwd)]);
+    const conflicts = keys.filter(([, key]) => this.#held.has(key) && this.#held.get(key) !== handoffId)
+      .map(([file, key]) => ({ file, holder: this.#held.get(key) }));
+    if (conflicts.length) return { ok: false, conflicts };
+    for (const [, key] of keys) this.#held.set(key, handoffId);
+    return { ok: true };
+  }
+  release(handoffId) {
+    for (const [key, holder] of this.#held) if (holder === handoffId) this.#held.delete(key);
+  }
+}
+export const writeLocks = new WriteLocks();
+
+/** childId -> { role, files: Set<pathKey>, cwd } for running handoffs. */
+export const children = new Map();
+const FILE_TOOLS = new Set(['write', 'edit']);
+
+// ponytail: 终端不受守卫，子代理可用 pwsh 改文件；回执违规检查兜底，需要时再加命令审查。
+export function childGuard(exec) {
+  const child = exec.agent ? children.get(exec.agent.id) : undefined;
+  if (!child) return undefined;
+  if (exec.name === 'delegate') return '子代理不能再派交接；请自己完成这一块，或在回执里交回给主代理。';
+  if (!FILE_TOOLS.has(exec.name)) return undefined;
+  if (!WRITE_ROLES.has(child.role)) return '只读角色不能修改文件；把需要的改动写进回执交给主代理。';
+  const target = exec.arguments?.file_path;
+  if (typeof target !== 'string' || !child.files.has(pathKey(target, child.cwd))) return '该文件不在本次交接的 files 里，不能修改。';
+  return undefined;
+}
