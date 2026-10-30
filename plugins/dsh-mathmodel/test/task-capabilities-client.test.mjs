@@ -8,18 +8,17 @@ test('manual combination only selects the captured blank session and never submi
   let blank = true;
   const actions = createTaskCapabilityActions({ session: id => ({ id, blank }), describe: async () => ({ hostHash: 'host' }), confirm: async (...args) => { calls.push(args); return { preset: args[1] }; } });
   const preview = await actions.describe('first');
-  assert.deepEqual(await actions.apply('first', 5, preview), { preset: 'task-05' });
-  assert.deepEqual(calls, [['first', 'task-05', 'host']]);
+  assert.deepEqual(await actions.apply('first', preview), { preset: 'task' });
+  assert.deepEqual(calls, [['first', 'task', 'host']]);
   blank = false;
-  await assert.rejects(actions.apply('first', 15), /已经开始/);
-  for (const mask of [-1, 16, 1.5, '5']) await assert.rejects(actions.apply('first', mask), /无效/);
+  await assert.rejects(actions.apply('first', preview), /已经开始/);
   assert.equal(calls.length, 1);
 });
 
 test('a server-side first-turn race remains a visible refusal', async () => {
   const actions = createTaskCapabilityActions({ session: () => ({ blank: true }), confirm: async () => { throw new Error('agent-preset/locked'); } });
-  await assert.rejects(actions.apply('raced', 0, { hostHash: 'host' }), /locked/);
-  await assert.rejects(actions.apply('raced', 0), /Host/);
+  await assert.rejects(actions.apply('raced', { hostHash: 'host' }), /locked/);
+  await assert.rejects(actions.apply('raced'), /Host/);
 });
 
 test('idle task switches and model choice bypass the first-turn preset lock without sending messages', async () => {

@@ -152,7 +152,7 @@ test('parent switch change waits for every owned descendant and updates their sa
 });
 
 test('projection replays saved switches and validates input', () => {
-  assert.deepEqual(normalizeToolSwitches(null), { skills: true, mcp: true, taskBoard: true, disabledMcpServers: [] });
+  assert.deepEqual(normalizeToolSwitches(null), { skills: true, mcp: true, taskBoard: true, web: true, delegate: true, images: true, disabledMcpServers: [] });
   const value = normalizeToolSwitches({ skills: false, disabledMcpServers: ['academic-search'] });
   const replay = taskToolSwitchProjection.apply(null, { type: 'mathmodel/tool-switches', data: value });
   assert.deepEqual(replay, value);
@@ -185,4 +185,46 @@ test('controller requires an idle turn, saves durable event, and refreshes one s
   boundary = { openTurnStartSeq: 4, lastTurn: 2 };
   assert.throws(() => controller.set('a', { skills: true }), /空闲/);
   assert.equal(events.length, 1);
+});
+
+test('三个新开关：首轮前移除 schema，首轮后保留 schema 只守卫', async t => {
+  const root = new Context();
+  root.provide('systemPrompt', { tools: () => () => {} });
+  new ToolRuntime(root, { mode: 'native' });
+  const a = { id: 'a' };
+  const scope = createScope(root, a); a.ctx = scope.ctx;
+  t.after(() => scope.dispose());
+  const all = ['delegate', 'handoff_ledger', 'image_generate', 'read_file', 'web_fetch', 'web_search'];
+  const disposeTools = all.map(name => root.tools.register(tool(name)));
+  t.after(() => disposeTools.forEach(dispose => dispose()));
+  const event = data => ({ type: 'mathmodel/tool-switches', data });
+  let selection = null, wire = taskToolWireProjection.init();
+  const apply = e => { selection = taskToolSwitchProjection.apply(selection, e); wire = taskToolWireProjection.apply(wire, e); };
+  const switcher = installAgentToolSwitches(a, () => selection, root, () => wire.selection);
+  t.after(() => switcher.dispose());
+  const names = () => root.tools.schemas(a).map(row => row.name).sort();
+  apply(event({ web: false, delegate: false, images: false })); switcher.refresh();
+  assert.deepEqual(names(), ['read_file']);
+  apply(event({})); switcher.refresh();
+  assert.deepEqual(names(), all);
+  apply({ type: 'turn/start', data: { turn: 1 } });
+  apply(event({ delegate: false })); switcher.refresh();
+  assert.deepEqual(names(), all, '首轮后关闭不移除 schema');
+  assert.match(root.tools.guardReason({ agent: a, name: 'delegate' }), /关闭/);
+  assert.equal(root.tools.guardReason({ agent: a, name: 'web_fetch' }), undefined);
+});
+
+test('toolDenied 覆盖三个新开关，本地 read_image 不受影响', () => {
+  const off = normalizeToolSwitches({ web: false, delegate: false, images: false });
+  for (const name of ['web_fetch', 'web_search', 'delegate', 'handoff_ledger', 'vision_analyze', 'image_generate', 'editable_ppt_image']) assert.equal(toolDenied(name, off), true, name);
+  assert.equal(toolDenied('read_image', off), false);
+  assert.equal(toolDenied('delegate', normalizeToolSwitches(null)), false);
+});
+
+test('旧会话里没有新字段的开关事件按全开处理', () => {
+  const old = { skills: false, mcp: true, taskBoard: true, disabledMcpServers: [] };
+  const replay = taskToolSwitchProjection.apply(null, { type: 'mathmodel/tool-switches', data: old });
+  assert.equal(replay.delegate, true);
+  assert.equal(replay.web, true);
+  assert.equal(taskToolSwitchProjection.stateSchema.safeParse(old).success, true, '旧快照仍能通过状态校验');
 });

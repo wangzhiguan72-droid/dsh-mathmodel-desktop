@@ -5,11 +5,15 @@ const switchesSchema = z.object({
   skills: z.boolean(),
   mcp: z.boolean(),
   taskBoard: z.boolean(),
+  // Added after 0.2.0; snapshots saved before then lack them and mean "on".
+  web: z.boolean().default(true),
+  delegate: z.boolean().default(true),
+  images: z.boolean().default(true),
   disabledMcpServers: z.array(z.string()),
 }).strict();
 
 export const DEFAULT_TOOL_SWITCHES = Object.freeze({
-  skills: true, mcp: true, taskBoard: true, disabledMcpServers: [],
+  skills: true, mcp: true, taskBoard: true, web: true, delegate: true, images: true, disabledMcpServers: [],
 });
 
 export function normalizeToolSwitches(value) {
@@ -34,6 +38,7 @@ export const taskToolSwitchProjection = {
 // because removing an offered schema breaks the provider prefix cache. The guard still enforces the selection.
 const widen = (wire, next) => ({
   skills: wire.skills || next.skills, mcp: wire.mcp || next.mcp, taskBoard: wire.taskBoard || next.taskBoard,
+  web: wire.web || next.web, delegate: wire.delegate || next.delegate, images: wire.images || next.images,
   disabledMcpServers: wire.mcp && next.mcp ? wire.disabledMcpServers.filter(name => next.disabledMcpServers.includes(name))
     : wire.mcp ? wire.disabledMcpServers : next.disabledMcpServers,
 });
@@ -52,9 +57,16 @@ export const taskToolWireProjection = {
   stateVersion: 1,
 };
 
+const WEB_TOOLS = new Set(['web_fetch', 'web_search']);
+const DELEGATE_TOOLS = new Set(['delegate', 'handoff_ledger']);
+// Same names as IMAGE_TOOLS in capabilities.js, which imports a Host-only package.
+const IMAGES = new Set(['vision_analyze', 'image_generate', 'editable_ppt_image']);
 export function toolDenied(name, selection) {
   if (name === 'skill') return !selection.skills;
   if (name.startsWith('task_board_')) return !selection.taskBoard;
+  if (WEB_TOOLS.has(name)) return !selection.web;
+  if (DELEGATE_TOOLS.has(name)) return !selection.delegate;
+  if (IMAGES.has(name)) return !selection.images;
   if (!name.startsWith('mcp__')) return false;
   if (!selection.mcp) return true;
   return selection.disabledMcpServers.some(server => name.startsWith(`mcp__${server}__`));

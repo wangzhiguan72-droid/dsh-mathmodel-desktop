@@ -7,13 +7,14 @@ import { createInstalledHostClient } from './installed-host-client.mjs';
 const client = await createInstalledHostClient();
 const sessions = [];
 const receipt = { observedAt: new Date().toISOString(), modelRequests: 0, checks: {} };
-const selection = { skills: false, mcp: false, taskBoard: false, disabledMcpServers: [] };
+const selection = { skills: false, mcp: false, taskBoard: false, web: false, delegate: false, images: false, disabledMcpServers: [] };
+const EXTRA = ['web_fetch', 'web_search', 'delegate', 'handoff_ledger', 'vision_analyze', 'image_generate', 'editable_ppt_image'];
 const describe = sessionId => client.rpc('mathmodelHostCapabilities', 'describeTools', { sessionId });
 const folder = path.resolve('dist/task-tool-switches');
 await fs.mkdir(folder, { recursive: true });
 try {
   for (let i = 0; i < 2; i++) {
-    const created = await client.rpc('session', 'create', { request: { cwd: folder, agentPreset: 'standard' } });
+    const created = await client.rpc('session', 'create', { request: { cwd: folder, agentPreset: 'task' } });
     sessions.push(created.sessionId);
   }
   const before = await describe(sessions[0]);
@@ -21,6 +22,8 @@ try {
   const disabled = await client.rpc('mathmodelHostCapabilities', 'setTools', { sessionId: sessions[0], selection });
   assert.equal(disabled.skillToolAvailable, false);
   assert.equal(disabled.effectiveToolNames.some(name => name.startsWith('mcp__') || name.startsWith('task_board_')), false);
+  for (const name of ['delegate', 'web_fetch']) assert.ok(before.effectiveToolNames.includes(name), `task preset offers ${name}`);
+  assert.equal(disabled.effectiveToolNames.some(name => EXTRA.includes(name)), false);
   assert.deepEqual((await describe(sessions[1])).effectiveToolNames, other.effectiveToolNames);
   assert.ok(disabled.toolCount < before.toolCount);
   const projection = await client.rpc('session', 'projections', { request: { sessionId: sessions[0] } });
@@ -28,7 +31,7 @@ try {
   // Present only in the 2026-10-28 build: proves the installed Host loaded the cache-preserving switches.
   assert.deepEqual(projection.values.mathmodelToolSwitchWire, { selection, started: false });
   receipt.checks = { toolCountBefore: before.toolCount, toolCountAfter: disabled.toolCount, otherTaskUnchanged: true,
-    skillHidden: true, mcpHidden: true, taskBoardHidden: true, persisted: true, wireProjectionLoaded: true,
+    skillHidden: true, mcpHidden: true, taskBoardHidden: true, webDelegateImagesHidden: true, persisted: true, wireProjectionLoaded: true,
     mcp: before.inventory.find(row => row.id === 'mcp').servers.map(({ serverName, publishedTools }) => ({ serverName, publishedTools })) };
   const restored = await client.rpc('mathmodelHostCapabilities', 'setTools', { sessionId: sessions[0], selection: before.selection });
   assert.deepEqual(restored.effectiveToolNames, before.effectiveToolNames);

@@ -269,11 +269,10 @@ function createTaskCapabilityActions({ session, describe, confirm, describeTools
     describeTools: sessionId => describeTools(sessionId),
     setTools: (sessionId, selection) => setTools(sessionId, selection),
     selectModel: (sessionId, provider, model) => selectModel(sessionId, provider, model),
-    async apply(sessionId, mask, preview) {
-      if (!Number.isInteger(mask) || mask < 0 || mask > 15) throw new Error('无效的能力组合');
+    async apply(sessionId, preview) {
       if (!sessionId || session(sessionId)?.blank !== true) throw new Error('任务已经开始或尚未选择工作区；请在新的空白任务中设置能力。');
       if (!preview?.hostHash) throw new Error('请先读取并确认 Host 状态。');
-      return await confirm(sessionId, `task-${mask.toString(16).padStart(2, '0')}`, preview.hostHash);
+      return await confirm(sessionId, 'task', preview.hostHash);
     },
   };
 }
@@ -997,19 +996,16 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
         const listing = React.useSyncExternalStore(callback => sessions.list.subscribe(callback), () => sessions.list.getSnapshot());
         const session = listing.byId[sessionId];
         const preset = session?.projectionValues?.agentPreset;
-        const selected = /^task-[0-9a-f]{2}$/.test(preset ?? '') ? Number.parseInt(preset.slice(5), 16) : null;
         const [open, setOpen] = React.useState(false);
-        const [mask, setMask] = React.useState(selected ?? 15);
         const [busy, setBusy] = React.useState(false);
         const [error, setError] = React.useState('');
         const [host, setHost] = React.useState(null);
-        React.useEffect(() => { setOpen(false); setError(''); setMask(selected ?? 15); }, [sessionId, preset]);
+        React.useEffect(() => { setOpen(false); setError(''); }, [sessionId, preset]);
         const blank = session?.blank === true && host?.locked !== true;
-        const groups = [['联网检索', 1], ['Skills', 2], ['子代理与工作流', 4], ['外部视觉与生图', 8]];
         const apply = async () => {
           if (busy) return;
           setBusy(true); setError('');
-          try { await actions.apply(sessionId, mask, host); setOpen(false); }
+          try { await actions.apply(sessionId, host); setOpen(false); }
           catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
           finally { setBusy(false); }
         };
@@ -1017,17 +1013,15 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
           session?.projectionValues?.mathmodelCapabilities?.blockedReason ? React.createElement('span', { role: 'alert', title: session.projectionValues.mathmodelCapabilities.blockedReason }, '能力已暂停') : null,
           React.createElement('button', { type: 'button', disabled: !sessionId || busy, 'aria-label': '任务前能力组合', 'aria-expanded': open,
             title: blank ? '在第一条消息前组合工具与技能' : '选择工作区后配置；任务开始后锁定',
-            onClick: async () => { setMask(selected ?? 15); setHost(null); setError(''); setOpen(true); setBusy(true); try { setHost(await actions.describe(sessionId)); } catch (failure) { setError(String(failure.message ?? failure)); } finally { setBusy(false); } } }, selected === null ? '能力组合' : `能力组合 ${groups.filter(([, bit]) => selected & bit).length}/4`),
+            onClick: async () => { setHost(null); setError(''); setOpen(true); setBusy(true); try { setHost(await actions.describe(sessionId)); } catch (failure) { setError(String(failure.message ?? failure)); } finally { setBusy(false); } } }, '能力组合'),
           open ? ReactDOM.createPortal(React.createElement('div', { className: 'dsh-mm-modal-frame', onKeyDown: event => { if (event.key === 'Escape' && !busy) setOpen(false); } },
             React.createElement('section', { className: 'dsh-mm-modal', role: 'dialog', 'aria-modal': true, 'aria-label': '任务前能力组合' },
               React.createElement('h2', null, '任务前能力组合'),
               React.createElement(TaskExtensionSwitches, { sessionId, actions }),
-              React.createElement('h3', null, '基础能力组合（首轮前设置）'),
-              React.createElement('p', null, '文件、终端、计划、压缩及权限机制始终保留。确认只切换当前空白任务，不发送消息；首轮开始后锁定。'),
-              ...groups.map(([label, bit]) => React.createElement('label', { key: bit, style: { display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0' } },
-                React.createElement('input', { type: 'checkbox', checked: Boolean(mask & bit), disabled: busy || !blank, onChange: event => { const checked = event.target.checked; setMask(value => checked ? value | bit : value & ~bit); } }), label)),
+              React.createElement('h3', null, 'Host 快照（首轮前确认）'),
+              React.createElement('p', null, '文件、终端、计划、压缩及权限机制始终保留。确认只记录当前空白任务的 Host 快照，不发送消息；首轮开始后锁定。'),
               React.createElement('p', null, '外部视觉与生图只控制 vision_analyze、image_generate、editable_ppt_image；官方本地 read_image 保留。付费调用仍需要单次授权。'),
-              React.createElement('p', null, host?.locked ? (host.matches ? '基础组合已按任务快照锁定；上方本任务开关仍可在空闲时调整。' : '全局插件配置与旧快照不一致；恢复原配置或新建任务。上方开关不会重签旧快照。') : '下方确认只保存基础组合；上方本任务开关单独保存并立即生效。'),
+              React.createElement('p', null, host?.locked ? (host.matches ? 'Host 快照已锁定；上方本任务开关仍可在空闲时调整。' : '全局插件配置与旧快照不一致；恢复原配置或新建任务。上方开关不会重签旧快照。') : '下方确认只保存 Host 快照；上方本任务开关单独保存并立即生效。'),
               React.createElement('button', { type: 'button', disabled: busy, onClick: async () => { setBusy(true); try { setHost(await actions.describe(sessionId)); setError(''); } catch (failure) { setError(String(failure.message ?? failure)); } finally { setBusy(false); } } }, '刷新 Host 状态'),
               error ? React.createElement('div', { role: 'alert', className: 'dsh-mm-error' }, error) : null,
               React.createElement('div', { className: 'dsh-mm-actions' },
@@ -1068,10 +1062,10 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
           React.createElement('h3', null, '本任务扩展开关'),
           React.createElement('p', null, '空闲时可随时调整，立即保存；不卸载全局插件，不影响其他任务。'),
           runtime ? React.createElement(React.Fragment, null,
-            React.createElement('button', { type: 'button', disabled, onClick: () => set({ skills: false, mcp: false, taskBoard: false }) }, '精简：关闭 Skills、MCP、任务板工具'),
+            React.createElement('button', { type: 'button', disabled, onClick: () => set({ skills: false, mcp: false, taskBoard: false, web: false, delegate: false, images: false }) }, '精简：关闭全部扩展工具'),
             toggle('skills', 'Skills 技能目录与调用'),
-            !runtime.skillToolAvailable && selection?.skills ? React.createElement('small', null, '当前预设不包含 Skills；请在新任务的基础组合中开启。') : null,
-            runtime.skillToolAvailable && !selection?.skills ? React.createElement('p', null, '此任务另有自身注册的 skill 工具：调用已被禁止，但其 schema 仍可能显示。新任务的基础组合关闭 Skills 可避免加载。') : null,
+            !runtime.skillToolAvailable && selection?.skills ? React.createElement('small', null, '当前预设不包含 Skills 工具。') : null,
+            runtime.skillToolAvailable && !selection?.skills ? React.createElement('p', null, '此任务另有自身注册的 skill 工具：调用已被禁止，但其 schema 仍可能显示。新任务在首轮前关闭 Skills 可避免加载。') : null,
             toggle('mcp', `MCP 外部工具（Host 已发布 ${mcp?.publishedTools ?? 0} 个）`),
             ...(mcp?.servers ?? []).map(server => React.createElement('label', { key: server.entryId, style: { display: 'flex', gap: 10, margin: '8px 0 8px 28px' } },
               React.createElement('input', { type: 'checkbox', disabled: disabled || !selection?.mcp || !server.enabled,
@@ -1082,6 +1076,9 @@ if (typeof window !== 'undefined' && window.__ModuleLoader__) {
               React.createElement('summary', null, `查看 ${server.serverName} 的工具名称`),
               React.createElement('ul', null, server.tools.map(name => React.createElement('li', { key: name }, name))))),
             toggle('taskBoard', '任务板工具'),
+            toggle('web', '联网检索'),
+            toggle('delegate', '子代理交接（delegate）'),
+            toggle('images', '外部视觉与生图'),
             React.createElement('p', null, `当前任务向模型提供 ${runtime.toolCount} 个工具 schema。首轮前关闭会移除对应 schema；首轮后关闭只禁止调用、保留 schema，以免打断提供方前缀缓存。旧对话已包含的文字仍保留。`),
             React.createElement('h4', null, `Fusion 双模型协作：${fusion ? '开启' : '关闭'}`),
             React.createElement('p', null, `当前选择：${runtime.model?.provider ?? '未设置'} / ${runtime.model?.model ?? '未设置'}`),

@@ -74,12 +74,12 @@ test('confirmation persists a replayable snapshot and refuses a stale Host previ
   const f = fixture();
   const preview = await f.controller.describe('s1');
   f.current.schemas.push({ name: 'mcp__late__read' });
-  await assert.rejects(f.controller.confirm('s1', 'task-0f', preview.hostHash), error => error.code === 'capabilities/host-changed');
+  await assert.rejects(f.controller.confirm('s1', 'task', preview.hostHash), error => error.code === 'capabilities/host-changed');
   f.current.schemas.pop();
-  await assert.rejects(f.controller.confirm('s1', 'task-0f', 'stale'), error => error.code === 'capabilities/host-changed');
+  await assert.rejects(f.controller.confirm('s1', 'task', 'stale'), error => error.code === 'capabilities/host-changed');
   assert.equal(f.events.length, 0);
-  const snapshot = await f.controller.confirm('s1', 'task-05', preview.hostHash);
-  assert.equal(snapshot.preset, 'task-05');
+  const snapshot = await f.controller.confirm('s1', 'task', preview.hostHash);
+  assert.equal(snapshot.preset, 'task');
   assert.equal(f.events[0].ignorable, true, 'external events must survive the official persistence read boundary');
   assert.deepEqual(capabilityProjection.apply(null, f.events[0]), f.state.mathmodelCapabilities);
   assert.equal(await f.controller.verify(f.agent), null);
@@ -92,12 +92,12 @@ test('confirmation persists a replayable snapshot and refuses a stale Host previ
 test('only a kernel-owned native child inherits its live parent snapshot', async () => {
   const f = fixture();
   const preview = await f.controller.describe('s1');
-  await f.controller.confirm('s1', 'task-05', preview.hostHash);
+  await f.controller.confirm('s1', 'task', preview.hostHash);
   let childSnapshot = null, owned = false;
-  const child = { id: 'child', session: { header: { origin: 'subagent', parentSession: 's1', agentPreset: 'task-05' }, append(type, data) { childSnapshot = capabilityProjection.apply(childSnapshot, { type, data }); } } };
+  const child = { id: 'child', session: { header: { origin: 'subagent', parentSession: 's1', agentPreset: 'task' }, append(type, data) { childSnapshot = capabilityProjection.apply(childSnapshot, { type, data }); } } };
   f.controller.agents.isOwnedBy = () => owned;
   const stateOf = f.controller.projections.stateOf;
-  f.controller.projections.stateOf = (session, key) => session === child.session ? key === 'agentPreset' ? 'task-05' : childSnapshot : stateOf(session, key);
+  f.controller.projections.stateOf = (session, key) => session === child.session ? key === 'agentPreset' ? 'task' : childSnapshot : stateOf(session, key);
   await f.controller.inheritChild(child, f.agent);
   assert.equal(childSnapshot, null);
   owned = true;
@@ -109,20 +109,28 @@ test('only a kernel-owned native child inherits its live parent snapshot', async
 });
 
 test('missing confirmation, changed schemas and resumed mismatches fail closed', async () => {
-  const f = fixture(); f.state.agentPreset = 'task-00';
+  const f = fixture(); f.state.agentPreset = 'task';
   assert.match(await f.controller.verify(f.agent), /先/);
   const preview = await f.controller.describe('s1');
-  await f.controller.confirm('s1', 'task-00', preview.hostHash);
+  await f.controller.confirm('s1', 'task', preview.hostHash);
   f.current.schemas.push({ name: 'mcp__late__tool' });
   assert.match(await f.controller.verify(f.agent), /快照不一致/);
   f.state.turnBoundary.lastTurn = 1;
-  await assert.rejects(f.controller.confirm('s1', 'task-0f', preview.hostHash), error => error.code === 'agent-preset/locked');
+  await assert.rejects(f.controller.confirm('s1', 'task', preview.hostHash), error => error.code === 'agent-preset/locked');
+});
+
+test('只接受合并后的 task 预设，旧组合 id 被拒绝', async () => {
+  const f = fixture();
+  const preview = await f.controller.describe('s1');
+  for (const preset of ['task-0f', 'task-00', 'standard']) await assert.rejects(f.controller.confirm('s1', preset, preview.hostHash), error => error.code === 'capabilities/invalid-preset');
+  f.state.agentPreset = 'task-0f';
+  assert.equal(await f.controller.verify(f.agent), null, '残留的旧预设会话不再被冻结检查拦住');
 });
 
 test('unsettled extensions cannot be confirmed, legacy presets keep their existing flow', async () => {
   const f = fixture();
   f.current.plugins.push({ entryId: 'auto', moduleName: '@deepseek-ai/dsh-auto-review', enabled: true, fiberPhase: 'failed' });
   const preview = await f.controller.describe('s1');
-  await assert.rejects(f.controller.confirm('s1', 'task-00', preview.hostHash), error => error.code === 'capabilities/host-unsettled');
+  await assert.rejects(f.controller.confirm('s1', 'task', preview.hostHash), error => error.code === 'capabilities/host-unsettled');
   assert.equal(await f.controller.verify(f.agent), null);
 });

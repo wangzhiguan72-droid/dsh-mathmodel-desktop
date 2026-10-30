@@ -111,13 +111,13 @@ test('能力入口直接接官方空白会话选择，不发送消息，不要�
   const picker = fixture.slots.find(slot => slot.options.id === 'mathmodel-task-capabilities');
   const props = picker.options.inject('s1');
   assert.equal(props.sessionId, 's1');
-  assert.deepEqual(await props.actions.apply('s1', 5, await props.actions.describe('s1')), { preset: 'task-05' });
-  assert.ok(fixture.calls.includes('preset:s1:task-05:host'));
+  assert.deepEqual(await props.actions.apply('s1', await props.actions.describe('s1')), { preset: 'task' });
+  assert.ok(fixture.calls.includes('preset:s1:task:host'));
   assert.equal(fixture.sends.length, 0);
   await dispose();
 });
 
-test('能力面板可渲染四项选择，读取 Host 后确认；已开始任务只读', async () => {
+test('能力面板不再有组合复选框，读取 Host 后确认；已开始任务只读', async () => {
   const states = []; let cursor = 0;
   const react = {
     Fragment: 'fragment',
@@ -130,18 +130,18 @@ test('能力面板可渲染四项选择，读取 Host 后确认；已开始任�
   const picker = fixture.slots.find(slot => slot.options.id === 'mathmodel-task-capabilities');
   const props = picker.options.inject('s1');
   let blank = true;
-  props.sessions.list = { subscribe: () => () => {}, getSnapshot: () => ({ byId: { s1: { id: 's1', blank, projectionValues: { agentPreset: 'task-0f' } } } }) };
+  props.sessions.list = { subscribe: () => () => {}, getSnapshot: () => ({ byId: { s1: { id: 's1', blank, projectionValues: { agentPreset: 'task' } } } }) };
   const render = () => { cursor = 0; return picker.component(props); };
   const flatten = value => value && typeof value === 'object' ? [value, ...value.children.flatMap(flatten)] : [];
   let nodes = flatten(render());
   await nodes.find(node => node.props['aria-label'] === '任务前能力组合').props.onClick();
   nodes = flatten(render());
-  assert.equal(nodes.filter(node => node.props.type === 'checkbox').length, 4);
+  assert.equal(nodes.filter(node => node.props.type === 'checkbox').length, 0);
   assert.equal(nodes.find(node => node.props.role === 'dialog').props['aria-modal'], true);
   const confirm = nodes.find(node => node.type === 'button' && node.children.includes('确认组合与 Host 快照'));
   assert.equal(confirm.props.disabled, false);
   await confirm.props.onClick();
-  assert.ok(fixture.calls.includes('preset:s1:task-0f:host'));
+  assert.ok(fixture.calls.includes('preset:s1:task:host'));
   // The Host turn boundary is authoritative even while the list's blank flag is stale.
   fixture.remotes.mathmodelHostCapabilities.describe = async () => ({ ok: true, value: { hostHash: 'host', inventory: [], locked: true, matches: true } });
   nodes = flatten(render());
@@ -193,6 +193,14 @@ test('本任务开关在旧任务仍可编辑，读取真实服务并通过模�
   assert.equal(checkbox.props.disabled, false);
   await checkbox.props.onChange({ target: { checked: false } });
   assert.equal(changed[0].selection.skills, false);
+  cursor = 0; nodes = flatten(extension.type(extension.props));
+  const labels = nodes.filter(node => node.type === 'label').map(node => node.children.filter(child => typeof child === 'string').join(''));
+  for (const label of ['联网检索', '子代理交接（delegate）', '外部视觉与生图']) assert.ok(labels.includes(label), label);
+  const toggleOf = label => nodes.find(node => node.type === 'label' && node.children.includes(label)).children.find(child => child?.props?.type === 'checkbox');
+  await toggleOf('子代理交接（delegate）').props.onChange({ target: { checked: false } });
+  assert.equal(changed.at(-1).selection.delegate, false);
+  await nodes.find(node => node.type === 'button' && node.children.includes('精简：关闭全部扩展工具')).props.onClick();
+  assert.deepEqual(Object.entries(changed.at(-1).selection).filter(([, value]) => value === true), []);
   cursor = 0; nodes = flatten(extension.type(extension.props));
   await nodes.find(node => node.type === 'button' && node.children.includes('关闭本任务 Fusion，使用普通模型')).props.onClick();
   assert.deepEqual(models, [['s1', 'deepseek-official', 'deepseek-flash']]);

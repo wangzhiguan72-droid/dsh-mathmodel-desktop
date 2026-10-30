@@ -9,6 +9,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { HostMutationGate, hasStartedTaskBoundary, installPluginManagerFreeze } from './host-freeze-policy.js';
 import { TaskToolSwitchController, taskToolSwitchProjection, taskToolWireProjection, assertTaskIdle } from './task-tool-switches.js';
 
+export const TASK_PRESET = 'task';
 export const HOST_GROUPS = Object.freeze([
   ['fusion', 'Fusion', /dsh-model-fusion/i],
   ['teams', 'Teams', /agent-team/i],
@@ -16,7 +17,7 @@ export const HOST_GROUPS = Object.freeze([
   ['mcp', 'MCP 外部服务', /dsh-mcp-client/i],
   ['taskBoard', '任务板', /task[-_]board/i],
 ]);
-const relevant = value => HOST_GROUPS.some(([, , pattern]) => pattern.test(value ?? '')) || /mathmodel/.test(value ?? '') || /^preset-task-0[0-9a-f]$/.test(value ?? '');
+const relevant = value => HOST_GROUPS.some(([, , pattern]) => pattern.test(value ?? '')) || /mathmodel/.test(value ?? '') || value === 'preset-task';
 function sorted(value) {
   if (Array.isArray(value)) return value.map(sorted);
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])]));
@@ -94,7 +95,7 @@ export class HostCapabilityController {
   }
   confirm(sessionId, preset, hostHash) {
     return this.gate.read(async () => {
-      if (!/^task-0[0-9a-f]$/.test(preset)) throw new RemoteError('capabilities/invalid-preset', '无效的任务能力组合。', {});
+      if (preset !== TASK_PRESET) throw new RemoteError('capabilities/invalid-preset', '无效的任务预设。', {});
       const agent = this.agent(sessionId);
       if (hasStartedTaskBoundary(this.boundary(agent))) throw new RemoteError('agent-preset/locked', '任务已开始，不能修改能力组合。', {});
       const current = await this.current();
@@ -108,7 +109,7 @@ export class HostCapabilityController {
     });
   }
   async verify(agent) {
-    if (!/^task-0[0-9a-f]$/.test(this.projections.stateOf(agent.session, 'agentPreset') ?? '')) return null;
+    if (this.projections.stateOf(agent.session, 'agentPreset') !== TASK_PRESET) return null;
     const confirmed = this.projections.stateOf(agent.session, 'mathmodelCapabilities');
     if (!confirmed) return '请先在「能力组合」面板确认 Host 状态；本任务尚未发送模型请求。';
     const current = await this.current();

@@ -66,6 +66,9 @@ test('official tool registry hides images per scope, contains late registration 
     .replace("'@deepseek-ai/schemastery'", JSON.stringify(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/schemastery')).href))
     .replace("'@deepseek-ai/dsh-scope'", JSON.stringify(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-scope')).href));
   const capabilities = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const switches = await import('../plugins/dsh-mathmodel/src/task-tool-switches.js');
+  const imagesOff = switches.normalizeToolSwitches({ images: false });
+  for (const name of capabilities.IMAGE_TOOLS) assert.equal(switches.toolDenied(name, imagesOff), true, `images switch covers ${name}`);
   const root = new Context();
   await root.plugin(SystemPrompt, {});
   await root.plugin(ToolRuntime, { mode: 'native' });
