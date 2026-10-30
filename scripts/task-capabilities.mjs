@@ -67,7 +67,7 @@ export function taskCapabilityPresets({ runtimeRoot = DEFAULT_RUNTIME_ROOT } = {
   return { presets: [{ id: 'task' }], yaml: `${BEGIN}\n${doc.toString().trimEnd()}\n${END}\n` };
 }
 
-/** Session logs are runs of zstd frames; decode each frame on its own. */
+/** Session logs are runs of zstd frames, or plain JSONL when compression is off. */
 export function findLegacyPresetSessions(sessionsDir) {
   const found = [];
   const walk = directory => {
@@ -76,20 +76,52 @@ export function findLegacyPresetSessions(sessionsDir) {
     for (const entry of entries) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (entry.name.endsWith('.jsonl.zstd') && framesOf(readFileSync(path)).some(text => LEGACY_PRESET.test(text))) found.push(path);
+      else if (entry.name.endsWith('.jsonl') || entry.name.endsWith('.jsonl.zstd')) {
+        // Fail closed: a log we cannot read counts as referencing the old presets.
+        const text = logText(path);
+        if (text === null || LEGACY_PRESET.test(text)) found.push(path);
+      }
     }
   };
   walk(sessionsDir);
   return found;
 }
-// ponytail: splits on the frame magic, so a magic byte run inside compressed data drops that frame; same method as hooks/session-decisions.mjs.
-function framesOf(buffer) {
-  const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
-  const starts = [];
-  for (let at = buffer.indexOf(magic); at >= 0; at = buffer.indexOf(magic, at + 1)) starts.push(at);
-  return starts.flatMap((start, i) => {
-    try { return [zstdDecompressSync(buffer.subarray(start, starts[i + 1] ?? buffer.length)).toString('utf8')]; } catch { return []; }
-  });
+function logText(path) {
+  try {
+    const buffer = readFileSync(path);
+    return path.endsWith('.zstd') ? framesText(buffer) : buffer.toString('utf8');
+  } catch { return null; }
+}
+// zstdDecompressSync decodes only the first frame and returns partial output for a truncated one,
+// so walk frame boundaries from the headers (RFC 8878 §3.1) and decode each frame on its own.
+// Null when the layout does not add up.
+function framesText(buffer) {
+  const texts = [];
+  let at = 0;
+  while (at < buffer.length) {
+    if (at + 4 > buffer.length) return null;
+    const magic = buffer.readUInt32LE(at);
+    if ((magic & 0xfffffff0) === 0x184d2a50) { // skippable frame
+      if (at + 8 > buffer.length) return null;
+      at += 8 + buffer.readUInt32LE(at + 4);
+      continue;
+    }
+    if (magic !== 0xfd2fb528 || at + 5 > buffer.length) return null;
+    const descriptor = buffer[at + 4], single = (descriptor >> 5) & 1, fcsFlag = descriptor >> 6;
+    let end = at + 5 + (single ? 0 : 1) + [0, 1, 2, 4][descriptor & 3] + [single, 2, 4, 8][fcsFlag];
+    for (let last = 0; !last;) {
+      if (end + 3 > buffer.length) return null;
+      const header = buffer.readUIntLE(end, 3), type = (header >> 1) & 3;
+      if (type === 3) return null;
+      last = header & 1;
+      end += 3 + (type === 1 ? 1 : header >>> 3);
+    }
+    if ((descriptor >> 2) & 1) end += 4;
+    if (end > buffer.length) return null;
+    texts.push(zstdDecompressSync(buffer.subarray(at, end)).toString('utf8'));
+    at = end;
+  }
+  return texts.join('');
 }
 const isHostSettingsRow = row => row?.id === 'mathmodel'
   && row.name === '@deepseek-harness/dsh-mathmodel'
@@ -114,6 +146,14 @@ export function replaceBlock(original, block, end, generatedYaml, generatedEnd) 
   const newline = original.includes('\r\n') ? '\r\n' : '\n';
   const body = generatedYaml.slice(0, generatedYaml.indexOf(generatedEnd)).trimEnd().replace(/\n/g, newline);
   return `${original.slice(0, block.from)}${body}${block.hostText ? `${newline}${block.hostText}` : ''}${newline}${generatedEnd}${original.slice(block.to + end.length)}`;
+}
+
+/** Drop a block; a Host settings row parked inside it stays, as a plain row. */
+export function removeBlock(original, block, end) {
+  const newline = original.includes('\r\n') ? '\r\n' : '\n';
+  const before = original.slice(0, block.from).replace(/(\r?\n)+$/, newline);
+  const after = original.slice(block.to + end.length).replace(/^(\r?\n)+/, newline);
+  return `${before}${block.hostText ? `${block.hostText}${newline}` : ''}${after}`;
 }
 
 export function appendBlock(original, generatedYaml) {
@@ -159,27 +199,30 @@ export function installTaskCapabilityPresets(options = {}) {
   const expected = document(yaml, generated.yaml).toJS();
   const owns = row => row?.id === 'preset-task' || row?.config?.id === 'task';
   if (rows.some(owns)) throw new Error('Task capability conflict: separate override targets a managed preset');
-  let candidate, migrated = false;
+  let candidate, migrated = false, skipped;
   const current = managedBlock(yaml, original, BEGIN, END);
   const legacy = managedBlock(yaml, original, BEGIN_V1, END_V1);
-  if (current) {
-    if (legacy) throw new Error('Task capability conflict: both v1 and v2 blocks are present');
-    if (current.managed.length === expected.length && expected.every((row, i) => isDeepStrictEqual(row, current.managed[i]))) return result({});
+  if (current && !(current.managed.length === expected.length && expected.every((row, i) => isDeepStrictEqual(row, current.managed[i])))) {
     throw new Error('Task capability conflict: managed definitions differ');
-  } else if (legacy) {
-    if (!V1_MANAGED_SHA256.has(createHash('sha256').update(JSON.stringify(legacy.managed)).digest('hex'))) {
-      return result({ skipped: '旧 task 预设块被手动修改过，未迁移' });
+  }
+  if (legacy) {
+    // Old sessions or a hand-edited block keep v1; v2 sits beside it until v1 can go.
+    if (!V1_MANAGED_SHA256.has(createHash('sha256').update(JSON.stringify(legacy.managed)).digest('hex'))) skipped = '旧 task 预设块被手动修改过，保留未删';
+    else {
+      const referenced = sessionsDir ? findLegacyPresetSessions(sessionsDir) : [];
+      if (referenced.length) skipped = `有 ${referenced.length} 个会话引用旧 task 预设，旧预设保留未删`;
     }
-    const referenced = sessionsDir ? findLegacyPresetSessions(sessionsDir) : [];
-    if (referenced.length) return result({ skipped: `有 ${referenced.length} 个会话引用旧 task 预设，未迁移` });
-    candidate = replaceBlock(original, legacy, END_V1, generated.yaml, END);
-    migrated = true;
-  } else {
+    if (skipped && current) return result({ skipped });
+    if (skipped) candidate = appendBlock(original, generated.yaml);
+    else if (current) { candidate = removeBlock(original, legacy, END_V1); migrated = true; }
+    else { candidate = replaceBlock(original, legacy, END_V1, generated.yaml, END); migrated = true; }
+  } else if (current) return result({});
+  else {
     if (rows.flatMap(row => row?.insert ?? []).some(owns)) throw new Error('Task capability conflict: existing preset identity');
     candidate = appendBlock(original, generated.yaml);
   }
-  if (!apply) return result({ changed: true, migrated });
-  return result({ changed: true, applied: true, migrated, backup: writePatch(profilePatch, candidate, { io, yaml, suffix: 'capabilities' }) });
+  if (!apply) return result({ changed: true, migrated, skipped });
+  return result({ changed: true, applied: true, migrated, skipped, backup: writePatch(profilePatch, candidate, { io, yaml, suffix: 'capabilities' }) });
 }
 
 

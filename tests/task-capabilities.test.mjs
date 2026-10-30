@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { zstdCompressSync } from 'node:zlib';
 import { taskCapabilityPresets, installTaskCapabilityPresets, findLegacyPresetSessions } from '../scripts/task-capabilities.mjs';
@@ -165,26 +166,62 @@ for (const [label, block] of [['v1', v1Block], ['0.1.6', () => readFileSync(reso
   }));
 }
 
-test('有会话引用旧预设时不迁移、不改文件', () => withDir('referenced', directory => {
+test('有会话引用旧预设时保留 v1 块、并排加上 v2；引用消失后再删 v1', () => withDir('referenced', directory => {
   const profilePatch = join(directory, 'cordis.patch.yml');
   const original = `- insert: []\n\n${v1Block()}`;
   writeFileSync(profilePatch, original);
   const sessionsDir = sessionsWith(directory, ['{"type":"x"}', '{"agentPreset":"task-0f"}']);
-  const result = installTaskCapabilityPresets({ runtimeRoot, profilePatch, sessionsDir, apply: true });
-  assert.equal(result.applied, false);
+  const options = { runtimeRoot, profilePatch, sessionsDir, apply: true };
+  const result = installTaskCapabilityPresets(options);
+  assert.equal(result.applied, true);
+  assert.equal(result.migrated, false);
   assert.match(result.skipped, /1 个会话引用旧 task 预设/);
-  assert.equal(readFileSync(profilePatch, 'utf8'), original);
-  assert.equal(readdirSync(directory).length, 2);
+  const both = readFileSync(profilePatch, 'utf8');
+  assert.ok(both.startsWith(original), 'v1 块原样保留');
+  const ids = parse(both).flatMap(row => row.insert ?? []).map(row => row.id).filter(id => id?.startsWith('preset-task'));
+  assert.ok(ids.includes('preset-task') && ids.includes('preset-task-0f'), ids.join(','));
+  assert.equal(installTaskCapabilityPresets(options).changed, false, '仍被引用时不再改');
+  rmSync(sessionsDir, { recursive: true, force: true });
+  assert.equal(installTaskCapabilityPresets(options).migrated, true);
+  const after = readFileSync(profilePatch, 'utf8');
+  assert.ok(!after.includes('task capabilities v1'));
+  assert.deepEqual(parse(after).flatMap(row => row.insert ?? []).map(row => row.id).filter(id => id?.startsWith('preset-task')), ['preset-task']);
 }));
 
-test('v1 块被手改过时 skipped，不抛错、不改文件', () => withDir('edited', directory => {
+test('读不懂的会话日志按“有引用”处理：坏帧与明文 jsonl', () => withDir('unreadable', directory => {
+  const sessions = join(directory, 'sessions', 's1');
+  fs.mkdirSync(sessions, { recursive: true });
+  const broken = Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 1, 2, 3]), zstdCompressSync(Buffer.from('{"agentPreset":"task"}\n'))]);
+  writeFileSync(join(sessions, 'session.v4.jsonl.zstd'), broken);
+  assert.equal(findLegacyPresetSessions(join(directory, 'sessions')).length, 1, '坏帧');
+  rmSync(join(sessions, 'session.v4.jsonl.zstd'));
+  writeFileSync(join(sessions, 'session.v4.jsonl'), '{"agentPreset":"task-03"}\n');
+  assert.equal(findLegacyPresetSessions(join(directory, 'sessions')).length, 1, '明文日志');
+}));
+
+test('帧内恰好出现帧头字节时仍能完整解码，不误报', () => withDir('false-magic', directory => {
+  const sessions = join(directory, 'sessions', 's1');
+  fs.mkdirSync(sessions, { recursive: true });
+  const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+  // Random bytes do not compress, so zstd stores them raw and the magic survives inside the frame.
+  const frame = zstdCompressSync(Buffer.concat([randomBytes(4096), magic, randomBytes(4096)]));
+  assert.ok(frame.indexOf(magic, 1) > 0, '测试前提：帧内含帧头字节');
+  writeFileSync(join(sessions, 'session.v4.jsonl.zstd'), Buffer.concat([frame, zstdCompressSync(Buffer.from('{"agentPreset":"task"}\n'))]));
+  assert.deepEqual(findLegacyPresetSessions(join(directory, 'sessions')), []);
+}));
+
+test('v1 块被手改过时保留它、并排加上 v2，以后也不自动删', () => withDir('edited', directory => {
   const profilePatch = join(directory, 'cordis.patch.yml');
   const original = `- insert: []\n\n${v1Block().replace('images: false', 'images: true')}`;
   writeFileSync(profilePatch, original);
-  const result = installTaskCapabilityPresets({ runtimeRoot, profilePatch, sessionsDir: join(directory, 'sessions'), apply: true });
-  assert.equal(result.applied, false);
+  const options = { runtimeRoot, profilePatch, sessionsDir: join(directory, 'sessions'), apply: true };
+  const result = installTaskCapabilityPresets(options);
+  assert.equal(result.applied, true);
   assert.match(result.skipped, /手动修改/);
-  assert.equal(readFileSync(profilePatch, 'utf8'), original);
+  assert.ok(readFileSync(profilePatch, 'utf8').startsWith(original));
+  const again = installTaskCapabilityPresets(options);
+  assert.equal(again.changed, false);
+  assert.match(again.skipped, /手动修改/);
 }));
 
 test('写临时文件失败时原文件与备份不变', () => withDir('write', directory => {

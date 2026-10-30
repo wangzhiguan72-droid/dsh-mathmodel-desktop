@@ -102,12 +102,16 @@ export const writeLocks = new WriteLocks();
 /** childId -> { role, files: Set<pathKey>, cwd } for running handoffs. */
 export const children = new Map();
 const FILE_TOOLS = new Set(['write', 'edit']);
+// Children never touch gates, project state, schedules or plugins; the read-only mm_* stay open.
+const CHILD_READ_MM = new Set(['mm_state', 'mm_skill_read', 'mm_check_deliverables']);
+const childForbidden = name => (name.startsWith('mm_') && !CHILD_READ_MM.has(name)) || name.startsWith('schedule_') || name.startsWith('plugin_');
 
 // ponytail: 终端不受守卫，子代理可用 pwsh 改文件；回执违规检查兜底，需要时再加命令审查。
 export function childGuard(exec) {
   const child = exec.agent ? children.get(exec.agent.id) : undefined;
   if (!child) return undefined;
   if (exec.name === 'delegate') return '子代理不能再派交接；请自己完成这一块，或在回执里交回给主代理。';
+  if (childForbidden(exec.name)) return '子代理不能改门禁、项目状态、定时任务或插件；把结论写进回执交给主代理。';
   if (!FILE_TOOLS.has(exec.name)) return undefined;
   if (!WRITE_ROLES.has(child.role)) return '只读角色不能修改文件；把需要的改动写进回执交给主代理。';
   const target = exec.arguments?.file_path;
@@ -203,8 +207,10 @@ export function apply(ctx, config = {}, overrides = {}) {
         provider: 'spawn', label: brief.title, childId: id, signal: exec.signal, delivery: 'caller',
         request: { cwd, parent: exec.agent, prompt: [{ type: 'text', text: renderBrief(brief, { id }) }], agentOptions, outputSchema: receiptSchema(brief.role) },
       });
-      onAbort = () => activation.dispose();
+      // dispose may reject; an unhandled rejection is fatal in the Host.
+      onAbort = () => { Promise.resolve().then(() => activation.dispose()).catch(() => {}); };
       exec.signal.addEventListener('abort', onAbort, { once: true });
+      if (exec.signal.aborted) onAbort();
       const result = await activation.result;
       const receipt = result?.structured ?? null;
       Object.assign(end, {

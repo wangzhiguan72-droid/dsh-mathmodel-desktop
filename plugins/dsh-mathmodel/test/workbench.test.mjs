@@ -85,3 +85,23 @@ test('文案里不再出现旧的 subagent 工具派发说法', () => {
   assert.ok(!source.includes('subagent 工具'));
   assert.ok(!source.includes('import.meta.url'), '知识库路径不再从插件位置推导');
 });
+
+test('只有 done 且 pass 且无违规才算 PASS；unsure/partial 一律 BLOCKED，违规算 FAIL', () => {
+  const at = { scope: 'M1', inputSnapshot: 'h' };
+  const receipt = { findings: [], open_questions: [] };
+  assert.equal(gateReceiptFromReview({ status: 'unsure', verdict: 'pass', receipt }, at).status, 'BLOCKED');
+  assert.equal(gateReceiptFromReview({ status: 'partial', verdict: 'pass', receipt }, at).status, 'BLOCKED');
+  assert.equal(gateReceiptFromReview({ status: 'done', verdict: 'pass', violations: ['改了文件'], receipt }, at).status, 'FAIL');
+});
+
+test('上一轮门禁还没 record 时不能再 prepare，FAIL 也要先记下来', async t => {
+  const { call } = await setup(t);
+  await call('mm_project_init', { title: '测试' });
+  assert.equal((await call('mm_gate', { gate: 'M1', mode: 'prepare' })).ok, true);
+  const again = await call('mm_gate', { gate: 'M1', mode: 'prepare' });
+  assert.equal(again.ok, false);
+  assert.match(again.error, /mode=record/);
+  const review = { status: 'done', verdict: 'fail', receipt: { findings: [{ level: 'major', claim: 'x', evidence: 'a.md:1' }], open_questions: [] } };
+  assert.equal((await call('mm_gate', { gate: 'M1', mode: 'record', review, scope: 'M1', inputSnapshot: 'h' })).status, 'fail');
+  assert.equal((await call('mm_gate', { gate: 'M1', mode: 'prepare' })).ok, true, '记下 FAIL 后可以复验');
+});

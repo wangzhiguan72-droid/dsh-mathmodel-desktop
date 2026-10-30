@@ -7,13 +7,13 @@ import { apply, writeLocks, children } from '../src/handoff.js';
 const KNOWN = new Set(['magpie']);
 const receipt = (files = [], extra = {}) => ({ status: 'done', summary: 's', findings: [], files_changed: files, commands_run: [], not_verified: [], open_questions: [], ...extra });
 
-function setup(config = {}) {
+function setup(config = {}, startActivation) {
   const root = new Context();
   const sections = [];
   root.provide('systemPrompt', { tools: () => () => {}, section: s => { sections.push(s); return () => {}; }, getSectionOrder: () => 2800 });
   new ToolRuntime(root, { mode: 'native' });
   const fake = { started: [], pending: [], disposed: 0 };
-  root.provide('subagents', {
+  root.provide('subagents', startActivation ? { startActivation } : {
     startActivation(spec) {
       fake.started.push(spec);
       let settle;
@@ -187,4 +187,29 @@ test('系统提示段是固定文本，包含“回执是报告，不是证据�
   const section = sections.find(s => s.name === 'tool:delegate');
   assert.equal(section.text(), section.text());
   assert.match(section.text(), /回执是报告，不是证据/);
+});
+
+test('中止时 dispose 失败不会变成未处理的拒绝', async () => {
+  let settle;
+  const { root } = setup({}, async spec => ({ childId: spec.childId, result: new Promise((_, reject) => { settle = reject; }), dispose: () => Promise.reject(new Error('teardown failed')) }));
+  const unhandled = [];
+  const onUnhandled = error => unhandled.push(error);
+  process.on('unhandledRejection', onUnhandled);
+  const ac = new AbortController();
+  const p = root.tools.get('delegate').execute(brief('explore'), { agent: { id: 'p1' }, signal: ac.signal });
+  await tick();
+  ac.abort();
+  settle(new Error('aborted'));
+  await p.catch(() => {});
+  await new Promise(r => setTimeout(r, 20));
+  process.off('unhandledRejection', onUnhandled);
+  assert.deepEqual(unhandled, []);
+});
+
+test('启动期间已中止的调用，拿到 activation 后立即 dispose', { timeout: 3000 }, async () => {
+  const ac = new AbortController();
+  let disposed = 0, settle;
+  const { root } = setup({}, async spec => { ac.abort(); return { childId: spec.childId, result: new Promise((_, reject) => { settle = reject; }), dispose: () => { disposed++; settle(new Error('aborted')); } }; });
+  await root.tools.get('delegate').execute(brief('explore'), { agent: { id: 'p1' }, signal: ac.signal }).catch(() => {});
+  assert.equal(disposed, 1);
 });

@@ -49,3 +49,12 @@ test('守卫经 ToolRuntime 生效', t => {
   children.set('c1', { role: 'review', files: new Set(), cwd: 'D:/r' });
   assert.match(root.tools.guardReason({ agent: { id: 'c1' }, name: 'write', arguments: { file_path: 'x' } }), /只读/);
 });
+
+test('子代理不能动门禁、项目状态、定时任务与插件管理；只读的 mm_* 照常', t => {
+  t.after(() => children.clear());
+  children.set('c-rev', { role: 'review', files: new Set(), cwd: 'D:/r' });
+  const g = name => childGuard({ agent: { id: 'c-rev' }, name, arguments: {} });
+  for (const name of ['mm_gate', 'mm_complete', 'mm_log', 'mm_todo', 'mm_project_init', 'mm_phase_enter', 'schedule_create', 'schedule_update', 'schedule_delete', 'plugin_manager']) assert.ok(g(name), name);
+  for (const name of ['mm_state', 'mm_skill_read', 'mm_check_deliverables', 'read', 'grep']) assert.equal(g(name), undefined, name);
+  assert.equal(childGuard({ agent: { id: 'p1' }, name: 'mm_gate', arguments: {} }), undefined, '主代理不受影响');
+});

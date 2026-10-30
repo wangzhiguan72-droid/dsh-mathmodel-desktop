@@ -250,17 +250,17 @@ async function start(appDir, phase) {
   }
   let capabilityCheck;
   if (process.env.DSH_PACKAGE_SMOKE_CAPABILITIES === '1') {
-    const presets = (await hostClient.rpc('agentPresets', 'list')).presets.filter(row => /^task-0[0-9a-f]$/.test(row.id));
-    assert.equal(presets.length, 16, 'Packaged app is missing task capability presets');
+    const presets = (await hostClient.rpc('agentPresets', 'list')).presets.filter(row => row.id === 'task' || row.id === 'math-workbench');
+    assert.deepEqual(presets.map(row => row.id).sort(), ['math-workbench', 'task'], 'Packaged app is missing the task or workbench preset');
     assert.ok(presets.every(row => !row.broken), 'Packaged task preset is broken');
     const registered = await hostClient.rpc('workspace', 'create', { request: { path: workspace } });
-    const { sessionId } = await hostClient.rpc('session', 'create', { request: { workspaceId: registered.workspace.workspaceId, agentPreset: 'task-00' } });
+    const { sessionId } = await hostClient.rpc('session', 'create', { request: { workspaceId: registered.workspace.workspaceId, agentPreset: 'task' } });
     const preview = await hostClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId });
-    await hostClient.rpc('mathmodelHostCapabilities', 'confirm', { sessionId, preset: 'task-0f', hostHash: preview.hostHash });
+    await hostClient.rpc('mathmodelHostCapabilities', 'confirm', { sessionId, preset: 'task', hostHash: preview.hostHash });
     const confirmed = await hostClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId });
     assert.equal(confirmed.matches, true);
-    assert.equal(confirmed.confirmed.preset, 'task-0f');
-    capabilityCheck = { presets: presets.length, confirmed: 'task-0f', matches: true, modelRequestsSent: false };
+    assert.equal(confirmed.confirmed.preset, 'task');
+    capabilityCheck = { presets: presets.length, confirmed: 'task', matches: true, modelRequestsSent: false };
   }
   const fusionBundle = (await hostClient.rpc('pluginManager', 'listBundles')).find(row => row.name === 'dsh-model-fusion');
   assert.equal(fusionBundle?.enabled, true, 'Fresh package does not select the Fusion bundle');

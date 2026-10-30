@@ -70,7 +70,8 @@ const REVIEW_LEVEL = { blocker: 'P0', major: 'P1', minor: 'P2' }
 export function gateReceiptFromReview(review, { scope, inputSnapshot }) {
   const receipt = review && review.receipt
   const findings = receipt && Array.isArray(receipt.findings) ? receipt.findings : []
-  const status = !receipt || (review && review.status === 'blocked') ? 'BLOCKED' : review.verdict === 'pass' ? 'PASS' : 'FAIL'
+  const violations = review && Array.isArray(review.violations) ? review.violations : []
+  const status = !receipt || review.status !== 'done' ? 'BLOCKED' : review.verdict === 'pass' && !violations.length ? 'PASS' : 'FAIL'
   return {
     scope: String(scope || ''), inputSnapshot: String(inputSnapshot || ''), status,
     evidence: findings.map((x) => String(x.evidence || '')).filter(Boolean),
@@ -367,6 +368,8 @@ export async function apply(ctx, config) {
     if (!state.project) return { ok: false, error: '项目未初始化' }
     const prereq = GATE_PREREQ[gate]
     if (prereq && gateStatus(prereq) !== 'pass') return { ok: false, error: '门禁 ' + gate + ' 的前置门禁 ' + prereq + ' 未通过（当前 ' + gateStatus(prereq) + '）' }
+    // A verdict that is never recorded is lost; FAIL must be recorded before rework and re-review.
+    if (state.phases[def.phase]['pending' + gate]) return { ok: false, error: '上一轮 ' + gate + ' 质检还没记录：先用 mm_gate mode=record gate=' + gate + ' 记下 delegate 的返回值（FAIL 也要记）；交接本身失败就记一份 BLOCKED 回执，再返工复验' }
     const ev = evidence && typeof evidence === 'object' ? evidence : {}
     const arr = (v) => Array.isArray(v) ? v : (v ? [String(v)] : [])
     const snapshot = {
@@ -399,9 +402,11 @@ export async function apply(ctx, config) {
       '## 判定规则',
       '存在未解决 P0 或 P1 只能返回 FAIL；缺少依赖/权限/输入或可验证证据返回 BLOCKED。',
     ]).filter(Boolean).join('\n')
+    state.phases[def.phase]['pending' + gate] = snapshot.at
+    await persist()
     return {
       ok: true, gate, title: def.title, phase: def.phase, after: def.after, brief, snapshot,
-      recordInstruction: '用 delegate role=review 派发独立验收（交接单写本简报的验收条款与输入快照，不写自己的判断），随后调用 mm_gate mode=record gate=' + gate + '，把 delegate 的返回值原样填进 review 参数，并填写 scope 与 inputSnapshot',
+      recordInstruction: '用 delegate role=review 派发独立验收（交接单写本简报的验收条款与输入快照，不写自己的判断），随后立即调用 mm_gate mode=record gate=' + gate + '，把 delegate 的返回值原样填进 review 参数，并填写 scope 与 inputSnapshot；无论 PASS 还是 FAIL 都要先记录，记录前不能再次 prepare',
     }
   }
 
@@ -433,6 +438,7 @@ export async function apply(ctx, config) {
       },
     }
     state.phases[def.phase]['gate' + gate] = record
+    delete state.phases[def.phase]['pending' + gate]
     log('gate_record', { gate, status: record.status, prevStatus })
     await persist()
     return { ok: true, gate, status: record.status, at: record.at, prevStatus, phase: def.phase, after: def.after }
