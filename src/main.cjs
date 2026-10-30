@@ -305,6 +305,17 @@ async function boot() {
     } catch (error) {
       pushLogLine('[desktop] task preset migration skipped: ' + (error && error.message ? error.message : String(error)));
     }
+    try {
+      const { installWorkbenchPreset } = await import('../scripts/workbench-preset.mjs');
+      const workbench = installWorkbenchPreset({
+        runtimeRoot: path.join(runtime.runtimeRoot, 'host', 'node_modules'),
+        profilePatch: path.join(profileDir, 'cordis.patch.yml'),
+        apply: true,
+      });
+      if (workbench.applied) pushLogLine('[desktop] added math workbench preset; backup: ' + workbench.backup);
+    } catch (error) {
+      pushLogLine('[desktop] workbench preset skipped: ' + (error && error.message ? error.message : String(error)));
+    }
   }
   pushLogLine(startupTiming.stage('migrations'));
 

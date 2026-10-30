@@ -18,6 +18,7 @@ files:
   - src/**
   - scripts/restore-specialized-presets.mjs
   - scripts/task-capabilities.mjs
+  - scripts/workbench-preset.mjs
   - scripts/migrate-fusion-bundle.mjs
 
 # The runtime payload (staged by scripts/build-runtime.mjs under
