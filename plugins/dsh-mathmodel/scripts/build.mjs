@@ -39,6 +39,7 @@ const files = [
   ['src/capabilities.js', 'lib/capabilities.js'],
   ['src/host-capabilities.js', 'lib/host-capabilities.js'],
   ['src/task-tool-switches.js', 'lib/task-tool-switches.js'],
+  ['src/handoff.js', 'lib/handoff.js'],
   ['src/host-freeze-policy.js', 'lib/host-freeze-policy.js'],
   ['types/index.d.ts', 'lib/types/index.d.ts'],
   ['types/client.d.ts', 'lib/types/client.d.ts'],
