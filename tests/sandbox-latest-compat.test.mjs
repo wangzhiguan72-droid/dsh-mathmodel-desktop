@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const root = path.resolve(import.meta.dirname, '..');
 const plugin = path.join(root, 'plugins/dsh-auto-mode');
 const hostModules = path.join(root, 'runtime/host/node_modules');
-const version = '0.2.1-rc.4';
+const version = '0.2.1-rc.5';
 
 test('sandbox auto declares the exact installed kernel cohort', () => {
   const compatibility = JSON.parse(fs.readFileSync(path.join(plugin, 'compatibility.json')));

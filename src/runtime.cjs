@@ -83,7 +83,7 @@ function activeWebFamilyRows(inventory) {
 }
 
 function hasCompleteWebFamily(rows, version = '0.4.5') {
-  if (version === '0.4.11') {
+  if (version === '0.4.11' || version === '0.4.12') {
     const children = rows?.children;
     if (!Array.isArray(children) || new Set(children).size !== children.length) return false;
     const required = new Set(WEB_FAMILY_ROWS_0411);

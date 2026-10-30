@@ -34,7 +34,7 @@ export function releaseFiles(releaseDir, version = VERSION) {
     throw new Error('Release verification receipt is incomplete');
   }
   const checksums = fs.readFileSync(path.join(releaseDir, 'SHA256SUMS.txt'), 'utf8');
-  if (!['0.1.3-bridge.1', VERSION, '0.1.4', '0.1.5', '0.1.6', '0.1.7', '0.1.8', '0.1.9'].includes(version)) throw new Error('Unsupported desktop release version');
+  if (!['0.1.3-bridge.1', VERSION, '0.1.4', '0.1.5', '0.1.6', '0.1.7', '0.1.8', '0.1.9', '0.2.0'].includes(version)) throw new Error('Unsupported desktop release version');
   const expectedNames = [`dsh-mathmodel-desktop-${version}-win-x64.zip`, `dsh-mathmodel-desktop-${version}-win-x64.exe`];
   const artifacts = expectedNames.map(name => {
     const entry = path.join(releaseDir, name), stat = fs.lstatSync(entry);

@@ -16,6 +16,7 @@ test('接受白名单内的 DeepSeek Harness 版本', () => {
   assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.2.1-alpha.4'));
   assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.2.1-rc.2'));
   assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.2.1-rc.4'));
+  assert.ok(SUPPORTED_DSH_VERSIONS.includes('0.2.1-rc.5'));
   for (const version of SUPPORTED_DSH_VERSIONS) {
     assert.equal(assertCompatibleHarnessVersion(version), version);
   }

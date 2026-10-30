@@ -1,8 +1,8 @@
 {
   "name": "dsh-mathmodel-desktop",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
-  "description": "DeepSeek 数学建模版：通用编程 Harness 桌面端，内置独立 Node 运行时、dsh 宿主（0.2.1-rc.4）与预装插件。",
+  "description": "DeepSeek 数学建模版：通用编程 Harness 桌面端，内置独立 Node 运行时、dsh 宿主（0.2.1-rc.5）与预装插件。",
   "main": "src/main.cjs",
   "author": "DeepSeek Harness Contributors",
   "license": "Apache-2.0",

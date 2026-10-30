@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageName = '@linxin666/dsh-web-all'
-const supportedVersions = ['0.4.5', '0.4.7', '0.4.11']
+const supportedVersions = ['0.4.5', '0.4.7', '0.4.11', '0.4.12']
 const sshPackageName = '@linxin666/dsh-ssh'
 const destinationOpen = 'window.open(t, "_blank", "noopener,noreferrer");'
 const legacyOpen = /const e = window\.open\(\);\s*if \(e\) \{\s*try \{\s*e\.opener = null;\s*\} catch \{\}\s*e\.location\.href = t;\s*\} else console\.warn\("Opening link blocked as opener could not be cleared"\);/g
@@ -57,7 +57,7 @@ async function patchDesktopLinksPackage(profileDir, { name, version, bundlePath,
 }
 
 // From 0.4.11 the aggregate no longer embeds the terminal; dsh-ssh carries the only copy.
-const thinAggregateVersions = ['0.4.11']
+const thinAggregateVersions = ['0.4.11', '0.4.12']
 
 export function patchWebAllDesktopLinksProfile(profileDir) {
   return patchDesktopLinksPackage(profileDir, {

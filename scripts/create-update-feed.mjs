@@ -13,7 +13,8 @@ const { compareVersions } = require('../src/desktop-updates.cjs');
 const schema = 'dsh.desktop-update/v1';
 const appId = 'com.deepseek.harness.mathmodel';
 const upgradeFlags = ['--upgrade-zip', '--upgrade-version', '--upgrade-url', '--upgrade-min-version'];
-const flags = new Set(['--zip', '--version', '--url', '--notes-file', '--out', ...upgradeFlags, '--upgrade-notes-file']);
+const baseFlags = ['--zip', '--version', '--url', '--notes-file'];
+const flags = new Set([...baseFlags, '--base-feed', '--out', ...upgradeFlags, '--upgrade-notes-file']);
 
 function parseArgs(argv) {
   const options = {};
@@ -24,7 +25,12 @@ function parseArgs(argv) {
     }
     options[flag] = argv[i + 1];
   }
-  for (const flag of ['--zip', '--version', '--url', '--out']) {
+  if (options['--base-feed']) {
+    // A published base route is reused as is; only the upgrade route is built here.
+    if (baseFlags.some(flag => options[flag])) throw new Error('--base-feed replaces --zip, --version, --url and --notes-file');
+    if (!options['--upgrade-zip']) throw new Error('--base-feed requires an upgrade');
+  }
+  for (const flag of options['--base-feed'] ? ['--out'] : ['--zip', '--version', '--url', '--out']) {
     if (!options[flag]) throw new Error(`Missing required argument: ${flag}`);
   }
   if (upgradeFlags.some(flag => options[flag]) && upgradeFlags.some(flag => !options[flag])) {
@@ -95,20 +101,45 @@ async function inspectZip(zipPath) {
   return { bytes: info.size, sha256: hash.digest('hex') };
 }
 
+/** Reuse the base route of an already published manifest, revalidating every field it carries. */
+async function readBaseFeed(feedPath, outPath) {
+  const resolved = path.resolve(feedPath);
+  if (resolved === outPath) throw new Error('Output cannot overwrite the base feed');
+  const info = await fs.lstat(resolved);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024) throw new Error('Base feed must be a small regular file');
+  const base = JSON.parse(await fs.readFile(resolved, 'utf8'));
+  const asset = base?.windows?.x64;
+  if (base?.schema !== schema || base.appId !== appId || base.channel !== 'stable' || typeof base.notes !== 'string'
+    || Buffer.byteLength(base.notes) > 16 * 1024 || typeof asset?.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)
+    || !Number.isSafeInteger(asset.bytes) || asset.bytes <= 0) {
+    throw new Error('Base feed is not a published desktop update manifest');
+  }
+  validVersion(base.version);
+  const url = validUrl(asset.url);
+  if (url !== asset.url) throw new Error('Base feed URL is not canonical');
+  return { schema, appId, channel: 'stable', version: base.version, notes: base.notes,
+    windows: { x64: { url, sha256: asset.sha256, bytes: asset.bytes } } };
+}
+
 export async function createUpdateFeed(argv) {
   const options = parseArgs(argv);
-  validVersion(options['--version']);
-  const url = validUrl(options['--url']);
-  const zipPath = path.resolve(options['--zip']);
   const outPath = path.resolve(options['--out']);
-  if (zipPath === outPath) throw new Error('Output cannot overwrite the ZIP');
-  const notes = options['--notes-file'] ? await fs.readFile(options['--notes-file'], 'utf8') : '';
-  if (Buffer.byteLength(notes) > 16 * 1024) throw new Error('Release notes exceed 16 KiB');
-  const { bytes, sha256 } = await inspectZip(zipPath);
-  const feed = {
-    schema, appId, channel: 'stable', version: options['--version'], notes,
-    windows: { x64: { url, sha256, bytes } },
-  };
+  let feed, zipPath;
+  if (options['--base-feed']) {
+    feed = await readBaseFeed(options['--base-feed'], outPath);
+  } else {
+    validVersion(options['--version']);
+    const url = validUrl(options['--url']);
+    zipPath = path.resolve(options['--zip']);
+    if (zipPath === outPath) throw new Error('Output cannot overwrite the ZIP');
+    const notes = options['--notes-file'] ? await fs.readFile(options['--notes-file'], 'utf8') : '';
+    if (Buffer.byteLength(notes) > 16 * 1024) throw new Error('Release notes exceed 16 KiB');
+    const { bytes, sha256 } = await inspectZip(zipPath);
+    feed = {
+      schema, appId, channel: 'stable', version: options['--version'], notes,
+      windows: { x64: { url, sha256, bytes } },
+    };
+  }
   if (options['--upgrade-zip']) {
     const upgradeVersion = options['--upgrade-version'];
     const minVersion = options['--upgrade-min-version'];

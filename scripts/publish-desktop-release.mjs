@@ -15,7 +15,8 @@ const PREVIOUS_VERSION = '0.1.5';
 const LAST_VERSION = '0.1.6';
 const PRIOR_VERSION = '0.1.7';
 const EARLIER_VERSION = '0.1.8';
-const CURRENT_VERSION = '0.1.9';
+const RECENT_VERSION = '0.1.9';
+const CURRENT_VERSION = '0.2.0';
 const RELEASES = Object.freeze({
   [BRIDGE_VERSION]: { tag: `v${BRIDGE_VERSION}` },
   [KERNEL_VERSION]: { tag: `v${KERNEL_VERSION}` },
@@ -24,8 +25,12 @@ const RELEASES = Object.freeze({
   [LAST_VERSION]: { tag: `v${LAST_VERSION}` },
   [PRIOR_VERSION]: { tag: `v${PRIOR_VERSION}` },
   [EARLIER_VERSION]: { tag: `v${EARLIER_VERSION}` },
+  [RECENT_VERSION]: { tag: `v${RECENT_VERSION}` },
   [CURRENT_VERSION]: { tag: `v${CURRENT_VERSION}` },
 });
+// Kernel feeds keep the bridge as their base route so pre-bridge installs migrate first.
+const BRIDGE_ZIP = `dsh-mathmodel-desktop-${BRIDGE_VERSION}-win-x64.zip`;
+const BRIDGE_URL = `https://github.com/${OWNER}/${REPO}/releases/download/v${BRIDGE_VERSION}/${BRIDGE_ZIP}`;
 const API_VERSION = '2026-03-10';
 const MAX_JSON_BYTES = 1024 * 1024;
 
@@ -55,18 +60,29 @@ function asset(filename, expectedHash) {
   return { name: path.basename(filename), path: filename, bytes: stat.size, sha256: digest };
 }
 
-export function planRelease(releaseDir, { version = CURRENT_VERSION, bridgeDir } = {}) {
+export function planRelease(releaseDir, { version = CURRENT_VERSION, bridgeDir, bridgePublished = false } = {}) {
   const release = RELEASES[version];
   if (!release) throw new Error('Unsupported desktop release version');
-  if (version !== BRIDGE_VERSION && !bridgeDir) throw new Error('Kernel publication requires --bridge-dir');
-  if (version === BRIDGE_VERSION && bridgeDir) throw new Error('Bridge publication cannot include --bridge-dir');
+  if (version === BRIDGE_VERSION && (bridgeDir || bridgePublished)) {
+    throw new Error('Bridge publication cannot include --bridge-dir or --bridge-published');
+  }
+  if (version !== BRIDGE_VERSION && Boolean(bridgeDir) === Boolean(bridgePublished)) {
+    throw new Error('Kernel publication requires --bridge-dir or --bridge-published (exactly one)');
+  }
   const verified = releaseFiles(releaseDir, version);
   const manifestPath = path.join(releaseDir, 'desktop-update.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const expectedUrl = `https://github.com/${OWNER}/${REPO}/releases/download/${release.tag}/${verified.zip.name}`;
-  const expectedAsset = version === BRIDGE_VERSION ? verified.zip : releaseFiles(bridgeDir, BRIDGE_VERSION).zip;
-  const expectedBaseUrl = version === BRIDGE_VERSION ? expectedUrl
-    : `https://github.com/${OWNER}/${REPO}/releases/download/v${BRIDGE_VERSION}/${expectedAsset.name}`;
+  // A published bridge is pinned by the manifest here and checked against GitHub before publication.
+  const pinned = manifest.windows?.x64;
+  if (bridgePublished && (typeof pinned?.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(pinned.sha256)
+    || !Number.isSafeInteger(pinned.bytes) || pinned.bytes < 1000000)) {
+    throw new Error('Desktop update manifest does not pin a valid published bridge ZIP');
+  }
+  const expectedAsset = version === BRIDGE_VERSION ? verified.zip
+    : bridgePublished ? { name: BRIDGE_ZIP, sha256: pinned.sha256, bytes: pinned.bytes }
+      : releaseFiles(bridgeDir, BRIDGE_VERSION).zip;
+  const expectedBaseUrl = version === BRIDGE_VERSION ? expectedUrl : BRIDGE_URL;
   if (manifest.schema !== 'dsh.desktop-update/v1' || manifest.appId !== 'com.deepseek.harness.mathmodel'
     || manifest.channel !== 'stable' || manifest.version !== (version === BRIDGE_VERSION ? version : BRIDGE_VERSION)
     || manifest.windows?.x64?.url !== expectedBaseUrl
@@ -96,8 +112,13 @@ export function planRelease(releaseDir, { version = CURRENT_VERSION, bridgeDir }
   ];
   const notes = fs.readFileSync(files[4].path, 'utf8');
   if (!notes.trim()) throw new Error('Release notes are empty');
-  return { schema: 'dsh.desktop-release-plan/v1', repository: `${OWNER}/${REPO}`,
+  const plan = { schema: 'dsh.desktop-release-plan/v1', repository: `${OWNER}/${REPO}`,
     tag: release.tag, version, releaseUrl: `https://github.com/${OWNER}/${REPO}/releases/tag/${release.tag}`, files, notes };
+  if (bridgePublished) {
+    plan.publishedBridge = { tag: `v${BRIDGE_VERSION}`, name: BRIDGE_ZIP, url: BRIDGE_URL,
+      sha256: expectedAsset.sha256, bytes: expectedAsset.bytes };
+  }
+  return plan;
 }
 
 export function readGitCredential() {
@@ -232,6 +253,21 @@ function verifyReleaseIdentity(release, tagName) {
   safeUploadUrl(release.upload_url, release.id);
 }
 
+// Confirm GitHub still serves the exact bridge ZIP that the new feed keeps as its base route.
+async function verifyPublishedBridge(client, bridge) {
+  if (bridge.tag !== `v${BRIDGE_VERSION}` || bridge.name !== BRIDGE_ZIP || bridge.url !== BRIDGE_URL) {
+    throw new Error('Published bridge pin is invalid');
+  }
+  const release = await client.json('GET', `${BASE}/releases/tags/${bridge.tag}`, 'Read published bridge release');
+  const assets = Array.isArray(release?.assets) ? release.assets.filter(item => item?.name === bridge.name) : [];
+  const [zip] = assets;
+  if (release?.tag_name !== bridge.tag || release.draft !== false || release.prerelease !== false
+    || assets.length !== 1 || zip.state !== 'uploaded' || zip.size !== bridge.bytes
+    || zip.digest !== `sha256:${bridge.sha256}` || zip.browser_download_url !== bridge.url) {
+    throw new Error('Published bridge release does not match the pinned base route');
+  }
+}
+
 function verifyAssets(remote, local) {
   if (!Array.isArray(remote) || remote.length !== local.length) throw new Error('Draft assets are incomplete');
   const byName = new Map(remote.map(item => [item.name, item]));
@@ -277,13 +313,15 @@ function result(release, plan) {
     onlineManifestVerified: false };
 }
 
-export async function publishRelease({ releaseDir, commit, resumeDraft, version = CURRENT_VERSION, bridgeDir }, dependencies = {}) {
+export async function publishRelease({ releaseDir, commit, resumeDraft, version = CURRENT_VERSION, bridgeDir,
+  bridgePublished = false }, dependencies = {}) {
   const expectedCommit = validateCommit(commit);
   if (!RELEASES[version]) throw new Error('Unsupported desktop release version');
-  const plan = (dependencies.plan || planRelease)(releaseDir, { version, bridgeDir });
+  const plan = (dependencies.plan || planRelease)(releaseDir, { version, bridgeDir, bridgePublished });
   const tagName = RELEASES[version].tag;
   if (plan.repository !== `${OWNER}/${REPO}` || plan.tag !== tagName || plan.version !== version
-    || plan.releaseUrl !== `https://github.com/${OWNER}/${REPO}/releases/tag/${tagName}`) {
+    || plan.releaseUrl !== `https://github.com/${OWNER}/${REPO}/releases/tag/${tagName}`
+    || Boolean(plan.publishedBridge) !== Boolean(bridgePublished)) {
     throw new Error('Release plan identity is invalid');
   }
   const fetchImpl = dependencies.fetch || globalThis.fetch;
@@ -297,6 +335,7 @@ export async function publishRelease({ releaseDir, commit, resumeDraft, version 
   const client = githubClient(fetchImpl, token, deadlines);
   const tagCommit = await resolveTagCommit(client, tagName);
   if (tagCommit !== expectedCommit) throw new Error('Remote release tag does not match the approved commit');
+  if (plan.publishedBridge) await verifyPublishedBridge(client, plan.publishedBridge);
   const existing = await listedReleases(client, tagName);
   if (existing.length > 1) throw new Error('Multiple releases use the fixed tag');
   let draft;
@@ -368,11 +407,12 @@ export async function publishRelease({ releaseDir, commit, resumeDraft, version 
 export function cliArgs(argv) {
   const defaultReleaseDir = path.resolve('dist', `release-${CURRENT_VERSION}`);
   const parsed = { releaseDir: defaultReleaseDir,
-    version: CURRENT_VERSION, publish: false, plan: false };
+    version: CURRENT_VERSION, publish: false, plan: false, bridgePublished: false };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--plan') { parsed.plan = true; continue; }
     if (key === '--publish') { parsed.publish = true; continue; }
+    if (key === '--bridge-published') { parsed.bridgePublished = true; continue; }
     if (key === '--release-dir' || key === '--commit' || key === '--resume-draft'
       || key === '--version' || key === '--bridge-dir') {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing ${key} value`);
@@ -383,6 +423,7 @@ export function cliArgs(argv) {
     throw new Error(`Unknown release option: ${key}`);
   }
   if (parsed.publish && parsed.plan) throw new Error('--plan and --publish are mutually exclusive');
+  if (parsed.bridgePublished && parsed.bridgeDir) throw new Error('--bridge-published and --bridge-dir are mutually exclusive');
   if (!RELEASES[parsed.version]) throw new Error('Unsupported desktop release version');
   if (!argv.includes('--release-dir')) {
     parsed.releaseDir = path.resolve('dist', parsed.version === BRIDGE_VERSION

@@ -237,7 +237,7 @@ async function start(appDir, phase) {
   const webFamilyVersion = JSON.parse(fs.readFileSync(path.join(appDir, 'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/package.json'), 'utf8')).version;
   const hostClient = await createInstalledHostClient({ logFile });
   let children;
-  if (webFamilyVersion === '0.4.11') {
+  if (['0.4.11', '0.4.12'].includes(webFamilyVersion)) {
     // 0.4.11 removed /rows; the plugin manager inventory is the family ledger.
     children = activeWebFamilyRows(await hostClient.rpc('pluginManager', 'listPlugins'));
     assert.ok(children, 'Plugin manager inventory is unreadable');
@@ -281,7 +281,7 @@ async function start(appDir, phase) {
   if (fs.existsSync(path.join(appDir, 'resources/runtime/kimi-webbridge/kimi-webbridge.exe'))) {
     assert.ok(allPlugins.some(row => row.moduleName === '@dsh-external/dsh-better-browser' && row.enabled && row.fiberPhase === 'active'), 'Kimi browser adapter is not active');
   }
-  const expectedRows = webFamilyVersion === '0.4.11'
+  const expectedRows = ['0.4.11', '0.4.12'].includes(webFamilyVersion)
     // Fresh 0.4.11 defaults: every row active except the opt-in ssh and skill-explorer.
     ? [...WEB_FAMILY_ROWS_0411, '@linxin666/dsh-liangshen']
     : [

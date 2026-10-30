@@ -37,7 +37,7 @@ const fusionBuildLock = path.join(desktopDir, 'scripts', 'fusion-prebuilt-lock.j
 /** Files copied from runtime/<part> into the staged payload. */
 const PART_FILES = {
   host: ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'node_modules'],
-  'profile-web': ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'cordis.patch.yml', 'node_modules'],
+  'profile-web': ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'cordis.patch.yml', 'vendor', 'node_modules'],
 };
 
 function readPinnedVersion(part, packageName) {

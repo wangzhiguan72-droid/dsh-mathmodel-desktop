@@ -84,13 +84,13 @@ export function patchDesktopServerSource(source) {
 export async function patchDesktopUpdateProfile(profileDir) {
   const aggregatePath = path.join(profileDir, 'node_modules', '@linxin666', 'dsh-web-all')
   const aggregate = JSON.parse(await readFile(path.join(aggregatePath, 'package.json'), 'utf8'))
-  if (aggregate.name !== '@linxin666/dsh-web-all' || !['0.3.23', '0.4.5', '0.4.7', '0.4.11'].includes(aggregate.version)) {
+  if (aggregate.name !== '@linxin666/dsh-web-all' || !['0.3.23', '0.4.5', '0.4.7', '0.4.11', '0.4.12'].includes(aggregate.version)) {
     throw new Error(`Unsupported desktop update family: ${aggregate.name}@${aggregate.version}`)
   }
   const version = aggregate.version
   // From 0.4.11 the aggregate is a thin loader; only dsh-update carries the entry.
   const names = version === '0.3.23' ? legacyNames
-    : version === '0.4.11' ? ['@linxin666/dsh-update'] : ['@linxin666/dsh-web-all', '@linxin666/dsh-update']
+    : version === '0.4.11' || version === '0.4.12' ? ['@linxin666/dsh-update'] : ['@linxin666/dsh-web-all', '@linxin666/dsh-update']
   const serverName = version === '0.3.23' ? 'dsh-remote-web-ui' : 'dsh-update'
   const candidates = []
   for (const name of names) {

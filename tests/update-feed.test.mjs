@@ -124,3 +124,46 @@ test('invalid versions, URLs, options and ZIPs leave an existing manifest untouc
   await assert.rejects(createUpdateFeed(args), /ZIP/);
   assert.equal(fs.readFileSync(out, 'utf8'), 'existing feed');
 });
+
+test('published base feed is reused verbatim and only the upgrade route is rebuilt', async t => {
+  const { root, out } = fixture(t);
+  const kernelZip = path.join(root, 'kernel.zip');
+  fs.writeFileSync(kernelZip, tinyZip());
+  const baseFeed = path.join(root, 'published.json');
+  const published = { schema: 'dsh.desktop-update/v1', appId: 'com.deepseek.harness.mathmodel', channel: 'stable',
+    version: '0.1.3-bridge.1', notes: '升级准备版\n', windows: { x64: {
+      url: 'https://github.com/owner/repo/releases/download/v0.1.3-bridge.1/bridge.zip', sha256: '1'.repeat(64), bytes: 412630385 } },
+    upgrades: [{ minVersion: '0.1.3-bridge.1', version: '0.1.3' }] };
+  const writeBase = (change = () => {}) => {
+    const feed = structuredClone(published);
+    change(feed);
+    fs.writeFileSync(baseFeed, JSON.stringify(feed));
+  };
+  const upgrade = ['--upgrade-zip', kernelZip, '--upgrade-version', '0.2.0', '--upgrade-min-version', '0.1.3-bridge.1',
+    '--upgrade-url', 'https://github.com/owner/repo/releases/download/v0.2.0/kernel.zip'];
+  const args = ['--base-feed', baseFeed, '--out', out, ...upgrade];
+  writeBase();
+  const feed = await createUpdateFeed(args);
+  const expectedBase = structuredClone(published);
+  delete expectedBase.upgrades;
+  const { upgrades, ...base } = feed;
+  assert.deepEqual(base, expectedBase);
+  assert.equal(upgrades.length, 1);
+  assert.equal(upgrades[0].version, '0.2.0');
+  assert.equal(upgrades[0].windows.x64.sha256, createHash('sha256').update(fs.readFileSync(kernelZip)).digest('hex'));
+  const saved = fs.readFileSync(out, 'utf8');
+  assert.deepEqual(JSON.parse(saved), feed);
+  for (const change of [feed => { feed.appId = 'other'; }, feed => { feed.channel = 'next'; },
+    feed => { feed.windows.x64.sha256 = 'x'; }, feed => { feed.windows.x64.url = 'http://example.com/bridge.zip'; },
+    feed => { feed.version = '0.1.3-bridge.01'; }]) {
+    writeBase(change);
+    await assert.rejects(createUpdateFeed(args));
+    assert.equal(fs.readFileSync(out, 'utf8'), saved);
+  }
+  writeBase();
+  for (const invalid of [[...args, '--zip', kernelZip], ['--base-feed', baseFeed, '--out', out],
+    ['--base-feed', out, '--out', out, ...upgrade]]) {
+    await assert.rejects(createUpdateFeed(invalid));
+    assert.equal(fs.readFileSync(out, 'utf8'), saved);
+  }
+});

@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url'
 const packageName = '@linxin666/dsh-client-ui-git-graph'
 const aggregateName = '@linxin666/dsh-web-all'
 const legacyVersion = '0.3.23'
-const nativeVersions = ['0.4.5', '0.4.7', '0.4.11']
+const nativeVersions = ['0.4.5', '0.4.7', '0.4.11', '0.4.12']
 // From 0.4.11 the aggregate is a thin loader and no longer embeds Git Graph.
-const thinAggregateVersions = ['0.4.11']
+const thinAggregateVersions = ['0.4.11', '0.4.12']
 const markers = ['\t\t//#region src/client/auto-isolation.ts',
   '\t\t//#region ../dsh-git-graph/src/client/auto-isolation.ts']
 const endMarker = '\t\t//#endregion'

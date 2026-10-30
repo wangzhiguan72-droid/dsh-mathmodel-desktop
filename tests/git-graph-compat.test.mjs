@@ -12,7 +12,7 @@ const vendor = path.join(root, 'runtime/profile-web/node_modules/@linxin666/dsh-
 const aggregateVendor = path.join(root, 'runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js')
 const installedFamily = JSON.parse(await readFile(path.join(path.dirname(aggregateVendor), '..', 'package.json'), 'utf8')).version
 // From 0.4.11 the aggregate is a thin loader without its own Git Graph copy.
-const thinAggregate = installedFamily === '0.4.11'
+const thinAggregate = ['0.4.11', '0.4.12'].includes(installedFamily)
 const begin = '\t\t//#region src/client/auto-isolation.ts'
 const end = '\t\t//#endregion'
 

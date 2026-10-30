@@ -53,7 +53,7 @@ assert.equal(activeFusionRows.length, 1);
 assert.equal(activeFusionRows[0].fiberPhase, 'active');
 const webAllVersion = /^@linxin666\/dsh-web-all@(.+)$/.exec(version.webAll ?? '')?.[1];
 // 0.4.11 removed /rows; the plugin manager inventory is the family ledger there.
-const familyResponse = webAllVersion === '0.4.11' ? undefined : await client.request('/api/dsh-web-all/rows');
+const familyResponse = ['0.4.11', '0.4.12'].includes(webAllVersion) ? undefined : await client.request('/api/dsh-web-all/rows');
 const degradedResponse = await client.request('/api/dsh-web-all/degraded');
 const fusionResponse = await client.request('/api/model-fusion?view=settings');
 if (familyResponse) assert.equal(familyResponse.status, 200);
@@ -72,7 +72,7 @@ const optional = optionalIds.map(id => {
   assert.ok(row.enabled ? row.fiberPhase === 'active' : row.fiberPhase !== 'active');
   return { entryId: id, enabled: row.enabled, fiberPhase: row.fiberPhase ?? null };
 });
-if (webAllVersion === '0.4.11') assert.equal(hasCompleteWebFamily(family, webAllVersion), true);
+if (['0.4.11', '0.4.12'].includes(webAllVersion)) assert.equal(hasCompleteWebFamily(family, webAllVersion), true);
 else assert.equal(family.children.length, 11 + optional.filter(row => row.enabled).length);
 const experimental = ['@deepseek-ai/dsh-experimental-agent-team-profile', '@deepseek-ai/dsh-experimental-auto-review'].map(name => {
   const row = bundles.find(item => item.name === name);

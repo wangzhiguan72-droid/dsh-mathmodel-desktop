@@ -67,7 +67,7 @@ if (bridge) {
   }
 }
 if (!bridge) {
-  if (['0.1.6', '0.1.7', '0.1.8', '0.1.9'].includes(desktop.version)) {
+  if (['0.1.6', '0.1.7', '0.1.8', '0.1.9', '0.2.0'].includes(desktop.version)) {
     for (const relative of [
       'resources/runtime/profile-web/node_modules/dsh-model-fusion/lib/client.js',
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/package.json',
@@ -75,7 +75,7 @@ if (!bridge) {
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/lib/client.js',
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/cordis.patch.yml',
     ]) { required.push(relative); compareFromZip.push(relative); }
-    if (['0.1.7', '0.1.8', '0.1.9'].includes(desktop.version)) {
+    if (['0.1.7', '0.1.8', '0.1.9', '0.2.0'].includes(desktop.version)) {
       for (const relative of [
         'resources/runtime/profile-web/node_modules/@dsh-external/dsh-better-browser/package.json',
         'resources/runtime/profile-web/node_modules/@dsh-external/dsh-better-browser/lib/index.js',
@@ -258,7 +258,7 @@ async function main() {
     const webAllClient = fs.readFileSync(file(unpacked,
       'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js'), 'utf8');
     // From 0.4.11 the aggregate no longer embeds the terminal; dsh-ssh carries the only copy.
-    if (expectedWeb !== '0.4.11') assert.ok(webAllClient.includes('window.open(t, "_blank", "noopener,noreferrer");'),
+    if (!['0.4.11', '0.4.12'].includes(expectedWeb)) assert.ok(webAllClient.includes('window.open(t, "_blank", "noopener,noreferrer");'),
       'Packaged dsh-web-all does not use the desktop-safe xterm link handler');
     assert.ok(!/const e = window\.open\(\);\s*if \(e\) \{\s*try \{\s*e\.opener = null;/.test(webAllClient),
       'Packaged dsh-web-all still uses the empty xterm popup flow');

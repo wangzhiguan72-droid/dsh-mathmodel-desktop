@@ -60,7 +60,7 @@ test('standalone SSH OSC 8 links use the desktop external-link handler', () => {
 test('installed published terminal bundles retain the audited OSC 8 shape', async () => {
   const installed = JSON.parse(await readFile(path.join(family, '@linxin666/dsh-web-all/package.json'), 'utf8')).version
   // From 0.4.11 the aggregate is a thin loader and dsh-ssh carries the only terminal.
-  const thin = installed === '0.4.11'
+  const thin = ['0.4.11', '0.4.12'].includes(installed)
   const packages = [
     ...(thin ? [] : [['dsh-web-all', path.join(family, '@linxin666/dsh-web-all'), patchWebAllDesktopLinks]]),
     ['dsh-ssh', path.join(family, '@linxin666/dsh-ssh'), patchSshDesktopLinks],

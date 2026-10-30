@@ -355,7 +355,7 @@ async function boot() {
     if (!Array.isArray(health.degraded) || health.degraded.length) throw new Error('Updated host has degraded plugins');
     const familyVersion = /^@linxin666\/dsh-web-all@([^\s]+)$/.exec(stamp?.webAll ?? '')?.[1];
     let family = {};
-    if (familyVersion === '0.4.11') {
+    if (['0.4.11', '0.4.12'].includes(familyVersion)) {
       // 0.4.11 removed /rows; read the active family rows from the plugin manager.
       const rpcId = crypto.randomUUID();
       const response = await fetch(new URL('/api/pluginManager/listPlugins', target), {

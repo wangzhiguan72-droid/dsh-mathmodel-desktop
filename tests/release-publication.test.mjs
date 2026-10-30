@@ -19,11 +19,13 @@ test('release CLI derives the directory from the selected version and preserves 
   for (const [version, directory] of [['0.1.3', 'kernel-upgrade-0.1.3'],
     [bridgeVersion, `updater-bridge-${bridgeVersion}`], ['0.1.4', 'release-0.1.4'],
     ['0.1.5', 'release-0.1.5'], ['0.1.6', 'release-0.1.6'], ['0.1.7', 'release-0.1.7'], ['0.1.8', 'release-0.1.8'],
-    ['0.1.9', 'release-0.1.9']]) {
+    ['0.1.9', 'release-0.1.9'], ['0.2.0', 'release-0.2.0']]) {
     assert.equal(cliArgs(['--plan', '--version', version]).releaseDir, path.resolve('dist', directory));
     assert.equal(cliArgs(['--plan', '--version', version, '--release-dir', 'custom']).releaseDir, 'custom');
   }
-  assert.equal(cliArgs(['--plan']).version, '0.1.9');
+  assert.equal(cliArgs(['--plan']).version, '0.2.0');
+  assert.equal(cliArgs(['--plan', '--bridge-published']).bridgePublished, true);
+  assert.throws(() => cliArgs(['--plan', '--bridge-published', '--bridge-dir', 'bridge']), /mutually exclusive/);
 });
 
 afterEach(() => {
@@ -71,7 +73,7 @@ function kernelFixture() {
   return { root: fixture('0.1.3', bridgeDir), bridgeDir };
 }
 
-function miniPlan(version = '0.1.9') {
+function miniPlan(version = '0.2.0') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-release-api-'));
   tempRoots.push(root);
   const files = ['one.zip', 'two.exe', 'desktop-update.json', 'SHA256SUMS.txt', `release-notes-${version}.txt`]
@@ -87,7 +89,7 @@ function miniPlan(version = '0.1.9') {
 function api(plan, { tagSha = commit, uploadStatus = 201, digestMissing = false,
   sizeMismatch = false, tagChanges = false, existingDraft = false,
   initialAssets = [], patchResponseLost = false, recheckFails = false,
-  createResponseLost = false, apiHangs = false } = {}) {
+  createResponseLost = false, apiHangs = false, bridgeRelease } = {}) {
   const tag = plan.tag;
   const calls = [];
   const uploaded = new Set(initialAssets);
@@ -106,6 +108,9 @@ function api(plan, { tagSha = commit, uploadStatus = 201, digestMissing = false,
     }
     if (target.pathname.endsWith(`/git/tags/${'b'.repeat(40)}`)) {
       return json(200, { object: { type: 'commit', sha: tagChanges && tagReads > 1 ? 'c'.repeat(40) : tagSha } });
+    }
+    if (bridgeRelease && target.pathname.endsWith(`/releases/tags/v${bridgeVersion}`) && method === 'GET') {
+      return json(200, bridgeRelease);
     }
     if (target.pathname.endsWith('/releases') && method === 'GET') {
       return json(200, created ? [{ id: 77, tag_name: tag, draft: !published }] : []);
@@ -218,14 +223,14 @@ test('bridge plan permits its standalone feed and kernel plan requires the verif
   assert.throws(() => planRelease(root, { version: '0.1.10', bridgeDir }), /Unsupported/);
 });
 
-test('0.1.9 default release plan updates existing 0.1.8 users through the migration bridge', async () => {
+test('0.1.9 release plan updates existing 0.1.8 users through the migration bridge', async () => {
   const bridgeDir = fixture(bridgeVersion);
   const root = fixture('0.1.9', bridgeDir);
-  const plan = planRelease(root, { bridgeDir });
+  const plan = planRelease(root, { version: '0.1.9', bridgeDir });
   assert.equal(plan.tag, 'v0.1.9');
   assert.equal(plan.files[0].name, 'dsh-mathmodel-desktop-0.1.9-win-x64.zip');
   const script = fileURLToPath(new URL('../scripts/publish-desktop-release.mjs', import.meta.url));
-  const cliPlan = JSON.parse(execFileSync(process.execPath, [script, '--release-dir', root,
+  const cliPlan = JSON.parse(execFileSync(process.execPath, [script, '--version', '0.1.9', '--release-dir', root,
     '--bridge-dir', bridgeDir, '--plan'], { encoding: 'utf8' }));
   assert.equal(cliPlan.version, '0.1.9');
   const { createRequire } = await import('node:module');
@@ -243,6 +248,52 @@ test('0.1.9 default release plan updates existing 0.1.8 users through the migrat
       assert.equal(result.release.version, target);
     }
     assert.equal((await checkForUpdate({ feedUrl, currentVersion: '0.1.9', allowLoopbackHttp: true })).available, false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('0.2.0 default release plan reuses the published bridge and reaches every earlier install', async () => {
+  const bridgeDir = fixture(bridgeVersion);
+  const root = fixture('0.2.0', bridgeDir);
+  const bridgeZip = fs.readFileSync(path.join(bridgeDir, `dsh-mathmodel-desktop-${bridgeVersion}-win-x64.zip`));
+  const plan = planRelease(root, { bridgePublished: true });
+  assert.equal(plan.tag, 'v0.2.0');
+  assert.deepEqual(plan.publishedBridge, { tag: `v${bridgeVersion}`, name: `dsh-mathmodel-desktop-${bridgeVersion}-win-x64.zip`,
+    url: `https://github.com/${owner}/releases/download/v${bridgeVersion}/dsh-mathmodel-desktop-${bridgeVersion}-win-x64.zip`,
+    sha256: digest(bridgeZip), bytes: bridgeZip.length });
+  assert.equal(planRelease(root, { bridgeDir }).publishedBridge, undefined);
+  assert.throws(() => planRelease(root), /requires --bridge-dir or --bridge-published/);
+  assert.throws(() => planRelease(root, { bridgeDir, bridgePublished: true }), /exactly one/);
+  const manifestPath = path.join(root, 'desktop-update.json');
+  const original = fs.readFileSync(manifestPath, 'utf8');
+  for (const change of [feed => { feed.windows.x64.sha256 = 'x'; }, feed => { feed.windows.x64.bytes = 10; },
+    feed => { feed.windows.x64.url = 'https://example.com/bridge.zip'; }, feed => { feed.version = '0.1.3'; }]) {
+    const feed = JSON.parse(original);
+    change(feed);
+    fs.writeFileSync(manifestPath, JSON.stringify(feed));
+    assert.throws(() => planRelease(root, { bridgePublished: true }), /manifest does not/);
+  }
+  fs.writeFileSync(manifestPath, original);
+  const script = fileURLToPath(new URL('../scripts/publish-desktop-release.mjs', import.meta.url));
+  const cliPlan = JSON.parse(execFileSync(process.execPath, [script, '--release-dir', root,
+    '--bridge-published', '--plan'], { encoding: 'utf8' }));
+  assert.equal(cliPlan.version, '0.2.0');
+  assert.equal(cliPlan.publishedBridge.sha256, digest(bridgeZip));
+  const { createRequire } = await import('node:module');
+  const { checkForUpdate } = createRequire(import.meta.url)('../src/desktop-updates.cjs');
+  const { createServer } = await import('node:http');
+  const server = createServer((request, response) => response.end(original));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const feedUrl = `http://127.0.0.1:${server.address().port}/desktop-update.json`;
+    for (const [currentVersion, target] of [['0.1.2', bridgeVersion], [bridgeVersion, '0.2.0'],
+      ['0.1.3', '0.2.0'], ['0.1.8', '0.2.0'], ['0.1.9', '0.2.0']]) {
+      const result = await checkForUpdate({ feedUrl, currentVersion, allowLoopbackHttp: true });
+      assert.equal(result.available, true);
+      assert.equal(result.release.version, target);
+    }
+    assert.equal((await checkForUpdate({ feedUrl, currentVersion: '0.2.0', allowLoopbackHttp: true })).available, false);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
@@ -339,6 +390,35 @@ test('bridge publication uses its fixed tag and refuses a mismatched plan before
   let credentialCalled = false;
   await assert.rejects(publishRelease({ releaseDir: '.', commit, version: bridgeVersion }, {
     plan: () => ({ ...plan, tag: 'v0.1.4' }), credential: async () => { credentialCalled = true; return 'x'; },
+  }), /identity is invalid/);
+  assert.equal(credentialCalled, false);
+});
+
+test('published bridge must match GitHub before a 0.2.0 draft is created', async () => {
+  const zip = Buffer.alloc(1_000_001, 7);
+  const name = `dsh-mathmodel-desktop-${bridgeVersion}-win-x64.zip`;
+  const url = `https://github.com/${owner}/releases/download/v${bridgeVersion}/${name}`;
+  const plan = { ...miniPlan(), publishedBridge: { tag: `v${bridgeVersion}`, name, url, sha256: digest(zip), bytes: zip.length } };
+  const release = { tag_name: `v${bridgeVersion}`, draft: false, prerelease: false, assets: [
+    { name, state: 'uploaded', size: zip.length, digest: `sha256:${digest(zip)}`, browser_download_url: url }] };
+  const deps = mock => ({ plan: () => plan, credential: async () => 'unit-test-token', fetch: mock.fetch });
+  const good = api(plan, { bridgeRelease: release });
+  assert.equal((await publishRelease({ releaseDir: '.', commit, bridgePublished: true }, deps(good))).state, 'published');
+  const bridgeRead = good.calls.findIndex(call => call.url.endsWith(`/releases/tags/v${bridgeVersion}`));
+  assert.ok(bridgeRead >= 0 && bridgeRead < good.calls.findIndex(call => call.method === 'POST'));
+  for (const change of [asset => { asset.digest = `sha256:${'0'.repeat(64)}`; }, asset => { asset.size += 1; },
+    asset => { asset.browser_download_url = 'https://example.com/other.zip'; }, (asset, rel) => { rel.draft = true; },
+    (asset, rel) => { rel.assets = []; }]) {
+    const changed = structuredClone(release);
+    change(changed.assets[0], changed);
+    const mock = api(plan, { bridgeRelease: changed });
+    await assert.rejects(publishRelease({ releaseDir: '.', commit, bridgePublished: true }, deps(mock)),
+      /does not match the pinned base route/);
+    assert.equal(mock.calls.some(call => call.method === 'POST'), false);
+  }
+  let credentialCalled = false;
+  await assert.rejects(publishRelease({ releaseDir: '.', commit }, {
+    plan: () => plan, credential: async () => { credentialCalled = true; return 'x'; },
   }), /identity is invalid/);
   assert.equal(credentialCalled, false);
 });

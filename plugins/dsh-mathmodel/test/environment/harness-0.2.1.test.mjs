@@ -8,7 +8,7 @@ import { assertCompatibleHarnessVersion } from '../../lib/version.js';
 import { isSupportedPluginManagerChangeSource } from '../../lib/host-freeze-policy.js';
 import { resolveRuntimeFile } from '../support/runtime.mjs';
 
-const VERSIONS = new Set(['0.2.1-alpha.4', '0.2.1-rc.2', '0.2.1-rc.4']);
+const VERSIONS = new Set(['0.2.1-alpha.4', '0.2.1-rc.2', '0.2.1-rc.4', '0.2.1-rc.5']);
 
 async function runtimeManifest(name) {
   const file = await resolveRuntimeFile(`${name}/package.json`);

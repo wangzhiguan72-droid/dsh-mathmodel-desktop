@@ -13,7 +13,7 @@ const runtime = path.join(root, 'runtime/profile-web/node_modules', scope)
 const bundle = path.join(runtime, 'dsh-update/lib/client.js')
 const installedFamily = JSON.parse(fs.readFileSync(path.join(runtime, 'dsh-web-all/package.json'), 'utf8')).version
 // From 0.4.11 the aggregate is a thin loader and only dsh-update carries the entry.
-const clientNames = installedFamily === '0.4.11' ? ['dsh-update'] : ['dsh-web-all', 'dsh-update']
+const clientNames = ['0.4.11', '0.4.12'].includes(installedFamily) ? ['dsh-update'] : ['dsh-web-all', 'dsh-update']
 
 function region(source, start, end) {
   const first = source.indexOf(start)
