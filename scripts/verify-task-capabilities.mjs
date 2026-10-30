@@ -45,8 +45,8 @@ export function apply(ctx) {
   const timer = setInterval(async () => {
     if (busy || !existsSync(${JSON.stringify(readyFile)})) return; busy = true;
     try {
-      const roster = (await ctx.agentPresets.list()).filter(row => row.id.startsWith('task-'));
-      if (roster.length !== 16) { busy = false; return; }
+      const roster = (await ctx.agentPresets.list()).filter(row => row.id === 'task');
+      if (roster.length !== 1) { busy = false; return; }
       const catalogs = [];
       for (const row of roster) {
         if (row.broken) throw new Error(row.id + ': ' + row.broken);
@@ -147,18 +147,15 @@ try {
   const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
   assert.equal(catalog.ok, true, catalog.error);
   for (const row of catalog.catalogs) {
-    const mask = Number.parseInt(row.id.slice(5), 16);
-    for (const name of ['vision_analyze', 'image_generate', 'editable_ppt_image']) assert.equal(row.names.includes(name), Boolean(mask & 8), `${row.id}: ${name}`);
-    for (const name of ['web_search', 'web_fetch']) assert.equal(row.names.includes(name), Boolean(mask & 1), `${row.id}: ${name}`);
-    assert.equal(row.names.includes('skill'), Boolean(mask & 2), `${row.id}: skill`);
-    for (const name of ['list_agents', 'workflow', 'subagent_fork']) assert.equal(row.names.includes(name), Boolean(mask & 4), `${row.id}: ${name}`);
+    for (const name of ['vision_analyze', 'image_generate', 'editable_ppt_image', 'web_search', 'web_fetch', 'skill', 'delegate', 'handoff_ledger']) assert.ok(row.names.includes(name), `${row.id}: ${name}`);
+    for (const name of ['subagent', 'subagent_fork', 'workflow', 'list_agents', 'send_message']) assert.ok(!row.names.includes(name), `${row.id}: ${name} must be absent`);
     assert.equal(row.schemaSha256, row.repeatedSha256);
   }
   const client = await createInstalledHostClient({ logFile });
   const registered = await client.rpc('workspace', 'create', { request: { path: workspace } });
   const workspaceId = registered.workspace.workspaceId;
   const roster = await client.rpc('agentPresets', 'list');
-  assert.equal(roster.presets.filter(row => row.id.startsWith('task-') && !row.broken).length, 16);
+  assert.equal(roster.presets.filter(row => row.id === 'task' && !row.broken).length, 1);
   const sessions = [];
   for (const row of catalog.catalogs) {
     const created = await client.rpc('session', 'create', { request: { agentPreset: row.id, workspaceId } });
@@ -168,14 +165,14 @@ try {
     const skills = await client.rpc('skills', 'list', { request: { sessionId: created.sessionId } });
     const list = Array.isArray(skills) ? skills : skills.skills ?? skills.items;
     assert.ok(Array.isArray(list), 'Unexpected skill catalog shape');
-    assert.equal(list.some(skill => skill.name === 'capability-fixture'), Boolean(Number.parseInt(row.id.slice(5), 16) & 2));
+    assert.equal(list.some(skill => skill.name === 'capability-fixture'), true);
     sessions.push({ preset: row.id, sessionId: created.sessionId, blank: true, fixtureSkillVisible: list.some(skill => skill.name === 'capability-fixture') });
   }
   const preview = await client.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId });
-  const changed = await client.rpc('mathmodelHostCapabilities', 'confirm', { sessionId: sessions[0].sessionId, preset: 'task-0f', hostHash: preview.hostHash });
-  assert.equal(changed.preset, 'task-0f');
+  const changed = await client.rpc('mathmodelHostCapabilities', 'confirm', { sessionId: sessions[0].sessionId, preset: 'task', hostHash: preview.hostHash });
+  assert.equal(changed.preset, 'task');
   const selected = await client.rpc('session', 'projections', { request: { sessionId: sessions[0].sessionId } });
-  assert.equal(selected.values.agentPreset, 'task-0f');
+  assert.equal(selected.values.agentPreset, 'task');
   const control = async (action, options = {}) => {
     if (fs.existsSync(answerFile)) fs.unlinkSync(answerFile);
     fs.writeFileSync(commandFile+'.tmp', JSON.stringify({ action, sessionId: sessions[0].sessionId, ...options }));
@@ -189,7 +186,7 @@ try {
   assert.equal((await control('pre-step')).preStep.kind, 'enter');
   const frozen = await client.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId });
   assert.equal(frozen.locked, true);
-  assert.equal(frozen.confirmed.preset, 'task-0f');
+  assert.equal(frozen.confirmed.preset, 'task');
   const refused = await client.rpc('pluginManager', 'setBundleEnabled', { name: 'dsh-model-fusion', enabled: false });
   assert.equal(refused.changed, false);
   assert.equal(refused.application, 'failed');
@@ -223,7 +220,7 @@ try {
     coldTargets.push({sessionId:sessions[1].sessionId,preset:sessions[1].preset,kind:'missing-confirmation'});
     for (const [index, overrides, kind] of [
       [2,{hostHash:'0'.repeat(64)},'host-hash'], [3,{globalToolsHash:'0'.repeat(64)},'tools-hash'],
-      [4,{preset:'task-0f'},'preset-mismatch'],
+      [4,{preset:'task'},'preset-mismatch'],
     ]) {
       const target = sessions[index], p = await client.rpc('mathmodelHostCapabilities','describe',{sessionId:target.sessionId});
       await client.rpc('mathmodelHostCapabilities','confirm',{sessionId:target.sessionId,preset:target.preset,hostHash:p.hostHash});
@@ -238,7 +235,7 @@ try {
   fs.unlinkSync(catalogFile);
   await awaitHost(launchHost());
   const resumedClient = await createInstalledHostClient({ logFile });
-  const resumed = await resumedClient.rpc('session', 'create', { request: { sessionId: sessions[0].sessionId, workspaceId, agentPreset: 'task-0f' } });
+  const resumed = await resumedClient.rpc('session', 'create', { request: { sessionId: sessions[0].sessionId, workspaceId, agentPreset: 'task' } });
   assert.equal(resumed.sessionId, sessions[0].sessionId);
   const restored = await resumedClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId });
   assert.equal(restored.locked, true);
@@ -288,16 +285,16 @@ try {
     negatives.push({name:'restored-configuration-tool-write',allowed:true,sideEffects:1});
   }
   assert.equal((await resumedClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId })).matches, true);
-  const concurrentTask = await resumedClient.rpc('session', 'create', { request: { workspaceId, agentPreset: 'task-07' } });
+  const concurrentTask = await resumedClient.rpc('session', 'create', { request: { workspaceId, agentPreset: 'task' } });
   const concurrentPreview = await resumedClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId: concurrentTask.sessionId });
-  await resumedClient.rpc('mathmodelHostCapabilities', 'confirm', { sessionId: concurrentTask.sessionId, preset: 'task-07', hostHash: concurrentPreview.hostHash });
+  await resumedClient.rpc('mathmodelHostCapabilities', 'confirm', { sessionId: concurrentTask.sessionId, preset: 'task', hostHash: concurrentPreview.hostHash });
   assert.equal((await resumedClient.rpc('mathmodelHostCapabilities', 'describe', { sessionId: sessions[0].sessionId })).matches, true, 'a different task scope must not alter the Host fingerprint');
   assert.equal((await control('pre-step')).preStep.kind, 'enter');
   const receipt = { ok: true, root, observedAt: new Date().toISOString(), modelPromptSent: false, installedProfileChanged: false, negativeChecks, negatives, blankSelectionChanged: true, hostSnapshot: frozen, blockedHostMutation: refused, syntheticBoundary: begun, coldResume: restored, afterRestart, configurationDrift: drifted, configurationRecovered: recovered, catalogs: catalog.catalogs, sessions };
   fs.writeFileSync(path.join(root, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
   fs.copyFileSync(path.join(root, 'receipt.json'), path.join(repo, negativeChecks ? 'dist/permissions-recovery-receipt.json' : 'dist/task-capabilities-receipt.json'));
   if (negativeChecks) fs.copyFileSync(policyAudit,path.join(repo,'dist/permissions-file-policy-audit.jsonl'));
-  console.log(`16 mounted catalogs and 16 blank sessions verified; ${path.join(root, 'receipt.json')}`);
+  console.log(`task preset catalog and blank session verified; ${path.join(root, 'receipt.json')}`);
   if (process.env.DSH_CAPABILITY_UI_HOLD === '1') {
     console.log(`UI verification ready; stop by creating ${path.join(root, 'ui-stop')}`);
     const deadline = Date.now() + 900000;

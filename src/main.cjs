@@ -292,13 +292,19 @@ async function boot() {
       apply: true,
     });
     if (presets.applied) pushLogLine('[desktop] restored specialized presets; backup: ' + presets.backup);
-    const { installTaskCapabilityPresets } = await import('../scripts/task-capabilities.mjs');
-    const capabilities = installTaskCapabilityPresets({
-      runtimeRoot: path.join(runtime.runtimeRoot, 'host', 'node_modules'),
-      profilePatch: path.join(profileDir, 'cordis.patch.yml'),
-      apply: true,
-    });
-    if (capabilities.applied) pushLogLine('[desktop] added task capability combinations; backup: ' + capabilities.backup);
+    try {
+      const { installTaskCapabilityPresets } = await import('../scripts/task-capabilities.mjs');
+      const capabilities = installTaskCapabilityPresets({
+        runtimeRoot: path.join(runtime.runtimeRoot, 'host', 'node_modules'),
+        profilePatch: path.join(profileDir, 'cordis.patch.yml'),
+        sessionsDir: path.join(home, 'sessions'),
+        apply: true,
+      });
+      if (capabilities.applied) pushLogLine('[desktop] ' + (capabilities.migrated ? 'merged task presets into one' : 'added task preset') + '; backup: ' + capabilities.backup);
+      if (capabilities.skipped) pushLogLine('[desktop] task preset migration skipped: ' + capabilities.skipped);
+    } catch (error) {
+      pushLogLine('[desktop] task preset migration skipped: ' + (error && error.message ? error.message : String(error)));
+    }
   }
   pushLogLine(startupTiming.stage('migrations'));
 
