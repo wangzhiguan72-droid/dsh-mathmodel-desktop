@@ -30,6 +30,9 @@
     "./handoff": {
       "default": "./lib/handoff.js"
     },
+    "./workbench": {
+      "default": "./lib/workbench.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -70,7 +73,7 @@
     "e2e:paper": "python scripts/run-paper-e2e.py",
     "test": "npm run build && node --test \"test/*.test.mjs\"",
     "test:environment": "npm run test:harness && npm run test:skills && node --test test/preflight.environment.mjs",
-    "check": "node --check src/index.js && node --check src/host.js && node --check src/typert-shared.js && node --check src/typert.host.js && node --check src/typert.remote-client.js && node --check src/client-bundle.cjs && node --check src/tools.js && node --check src/version.js && node --check src/cards/schema.js && node --check src/cards/registry.js && node --check src/cards/prompt.js && node --check src/cards/remote.js && node --check src/preflight.js && node --check src/security/redact.js && node --check src/security/credentials.js && node --check src/security/provider-settings.js && node --check src/security/image-connections.js && node --check src/security/image-credentials.js && node --check src/vision.js && node --check src/opencode-rt.js && node --check src/model-discovery.js && node --check src/image/adapters.js && node --check src/image/assets.js && node --check src/image/capabilities.js && node --check src/image/codex-auth.js && node --check src/image/grok-auth.js && node --check src/image/verify.js && node --check src/image/connections.js && node --check src/image/service.js && node --check src/tool-contracts.js && node --check src/handoff.js",
+    "check": "node --check src/index.js && node --check src/host.js && node --check src/typert-shared.js && node --check src/typert.host.js && node --check src/typert.remote-client.js && node --check src/client-bundle.cjs && node --check src/tools.js && node --check src/version.js && node --check src/cards/schema.js && node --check src/cards/registry.js && node --check src/cards/prompt.js && node --check src/cards/remote.js && node --check src/preflight.js && node --check src/security/redact.js && node --check src/security/credentials.js && node --check src/security/provider-settings.js && node --check src/security/image-connections.js && node --check src/security/image-credentials.js && node --check src/vision.js && node --check src/opencode-rt.js && node --check src/model-discovery.js && node --check src/image/adapters.js && node --check src/image/assets.js && node --check src/image/capabilities.js && node --check src/image/codex-auth.js && node --check src/image/grok-auth.js && node --check src/image/verify.js && node --check src/image/connections.js && node --check src/image/service.js && node --check src/tool-contracts.js && node --check src/handoff.js && node --check src/workbench.js",
     "test:skills": "npm run build && node --test \"test/environment/skills/*.test.mjs\"",
     "test:harness": "npm run build && node --test \"test/environment/harness*.test.mjs\" \"test/environment/profile.test.mjs\"",
     "test:legacy": "npm run build && node --test \"test/environment/legacy/*.test.mjs\"",
