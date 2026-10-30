@@ -17,12 +17,16 @@ const require = createRequire(import.meta.url);
 const { applyProfileSeed, ensureFrameworkCohort, ensureProfileFallbacks, findHostPort, childEnv, waitForGui } = require('../src/runtime.cjs');
 const runtime = path.join(repo, 'resources/runtime'), host = path.join(runtime, 'host'), runtimeRoot = path.join(host, 'node_modules');
 const YAML = createRequire(path.join(runtimeRoot, '__live_handoff__.cjs'))('yaml');
-const LEAD = { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' };
+// --all-flash: every route on Flash. Checks the handoff mechanics only, not Astra's review quality.
+const ALL_FLASH = process.argv.includes('--all-flash');
+const FLASH = { provider: 'magpie', model: 'workbuddy-ai/deepseek-v4.1-flash' };
+const LEAD = ALL_FLASH ? FLASH : { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' };
 // The lead and both handoff routes; the rest of the user's Magpie list is not needed here.
 const ROUTES = new Set(['workbuddy-ai/gpt-6-astra', 'workbuddy-ai/deepseek-v4.1-flash']);
 const TURN_TIMEOUT_MS = 15 * 60 * 1000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const wanted = process.argv.slice(2).length ? process.argv.slice(2) : ['find-bug', 'scaffold-fill', 'workbench-m1'];
+const named = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
+const wanted = named.length ? named : ['find-bug', 'scaffold-fill', 'workbench-m1'];
 
 const SCENARIOS = {
   'find-bug': {
@@ -107,7 +111,9 @@ async function eventsOf(client, sessionId) {
 }
 // Children are read through their parent's address; the Host refuses a bare child id.
 async function childEventsOf(client, parentSessionId, childSessionId) {
-  const page = await client.rpc('session', 'page', { request: { address: { kind: 'subagent', parentSessionId, childSessionId, mode: 'unknown' }, maxMessages: 500 } });
+  // page requires throughSeq; take the child's own cut when projections accepts its id, else read to the end.
+  const throughSeq = await client.rpc('session', 'projections', { request: { sessionId: childSessionId } }).then(p => p.asOfSeq, () => Number.MAX_SAFE_INTEGER);
+  const page = await client.rpc('session', 'page', { request: { address: { kind: 'subagent', parentSessionId, childSessionId, mode: 'unknown' }, throughSeq, maxMessages: 500 } });
   return page.records.map(row => row.event).filter(Boolean);
 }
 // The model each child actually called, from its own request headers.
@@ -128,6 +134,10 @@ applyProfileSeed(path.join(runtime, 'profile-web'), profile, 'seed', 'live-hando
 const patch = path.join(profile, 'cordis.patch.yml');
 installTaskCapabilityPresets({ runtimeRoot, profilePatch: patch, apply: true });
 installWorkbenchPreset({ runtimeRoot, profilePatch: patch, apply: true });
+if (ALL_FLASH) {
+  const roles = JSON.stringify(Object.fromEntries(['explore', 'implement', 'review', 'escalate'].map(role => [role, FLASH])));
+  fs.writeFileSync(patch, fs.readFileSync(patch, 'utf8').replace(/^( *)(name: "@deepseek-harness\/dsh-mathmodel\/handoff")/gm, (line, indent) => `${line}\n${indent}config: { roles: ${roles} }`));
+}
 ensureFrameworkCohort(home, host, 'mathmodel', 'live-handoff');
 ensureProfileFallbacks(home, host, 'mathmodel');
 // A real copy (not a link) of the knowledge base, so nothing here can reach the user's files.
@@ -162,7 +172,7 @@ const child = spawn(path.join(nodeHome, 'node.exe'), [path.join(runtimeRoot, '@d
 for (const pipe of [child.stdout, child.stderr]) pipe.on('data', data => fs.appendFileSync(logFile, data));
 const exited = new Promise(resolve => child.once('exit', resolve));
 const results = [];
-const save = () => fs.writeFileSync(path.join(output, 'receipt.json'), `${JSON.stringify({ root, lead: LEAD, results }, null, 2)}\n`);
+const save = () => fs.writeFileSync(path.join(output, 'receipt.json'), `${JSON.stringify({ root, lead: LEAD, allFlash: ALL_FLASH, results }, null, 2)}\n`);
 try {
   await waitForGui(port, { deadlineMs: 240000, isAlive: () => child.exitCode === null,
     getTokenUrl: () => fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').match(/^dsh web: (http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+)/m)?.[1] : undefined });
