@@ -136,7 +136,8 @@ export const RULES = [
 ].join('\n');
 
 const defaultDeps = {
-  randomUUID,
+  // Child ids are session ids; match the kernel's own `session-<uuid>` form.
+  randomUUID: () => `session-${randomUUID()}`,
   now: () => new Date().toISOString(),
   appendLine: async (file, row) => { await mkdir(dirname(file), { recursive: true }); await appendFile(file, `${JSON.stringify(row)}\n`, 'utf8'); },
   readLedger: async file => {
@@ -145,6 +146,7 @@ const defaultDeps = {
   },
 };
 const anyObject = { type: 'object', additionalProperties: true };
+const textOf = blocks => (Array.isArray(blocks) ? blocks : []).filter(block => block?.type === 'text').map(block => block.text).join('\n');
 
 function renderResult(value) {
   const head = `[${value.role}] ${value.title} · ${value.status}${value.verdict ? ` · ${value.verdict}` : ''} · 改动 ${value.files_changed.length} 个文件`;
@@ -167,7 +169,8 @@ const DELEGATE_PARAMETERS = {
   },
 };
 
-export function apply(ctx, config = {}, deps = defaultDeps) {
+export function apply(ctx, config = {}, overrides = {}) {
+  const deps = { ...defaultDeps, ...overrides };
   const roles = { ...DEFAULT_ROLES, ...config.roles };
   const ledgerFile = cwd => join(cwd, config.ledgerDir ?? '.dsh-handoff', 'ledger.jsonl');
   const record = async (cwd, row) => {
@@ -212,7 +215,11 @@ export function apply(ctx, config = {}, deps = defaultDeps) {
         stopReason: result?.stopReason ?? null,
       });
       const { kind: _kind, ...summary } = end;
-      return { ...summary, role: brief.role, title: brief.title, receipt, ...(receipt ? {} : { output: result?.output ?? '' }) };
+      return {
+        ...summary, role: brief.role, title: brief.title, receipt,
+        ...(receipt ? {} : { output: textOf(result?.output) }),
+        ...(result?.diagnostic ? { diagnostic: result.diagnostic } : {}),
+      };
     } catch (error) {
       end.error = error instanceof Error ? error.message : String(error);
       throw error;

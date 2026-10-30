@@ -121,14 +121,29 @@ test('子代理失败也释放写锁并写 end 行', async () => {
   writeLocks.release('x');
 });
 
-test('回执缺失记为 blocked 并标违规', async () => {
+test('回执缺失记为 blocked 并标违规；output 块展平成文字，diagnostic 带出', async () => {
   const { fake, call } = setup();
   const p = call('delegate', brief('explore'));
   await tick();
-  fake.resolve({ output: 'hi', stopReason: 'end_turn' });
+  fake.resolve({ output: [{ type: 'text', text: '没' }, { type: 'image', data: 'x' }, { type: 'text', text: '交回执' }], diagnostic: 'schema 未满足', stopReason: 'error' });
   const r = await p;
   assert.equal(r.status, 'blocked');
   assert.equal(r.violations.length, 1);
+  assert.equal(r.output, ['没', '交回执'].join('\n'));
+  assert.equal(r.diagnostic, 'schema 未满足');
+  assert.equal(r.stopReason, 'error');
+});
+
+test('默认交接 id 用内核的 session- 前缀', async () => {
+  const root = new Context();
+  root.provide('systemPrompt', { tools: () => () => {}, section: () => () => {}, getSectionOrder: () => 2800 });
+  new ToolRuntime(root, { mode: 'native' });
+  const ids = [];
+  root.provide('subagents', { startActivation: async spec => { ids.push(spec.childId); return { result: Promise.resolve({ structured: receipt(), stopReason: 'completed' }), dispose() {} }; } });
+  root.provide('workingDirectory', { ensure: async () => 'D:/r' });
+  apply(root, {}, { now: () => 't', appendLine: async () => {}, readLedger: async () => [] });
+  await root.tools.get('delegate').execute(brief('explore'), { agent: { id: 'p1' }, signal: new AbortController().signal });
+  assert.match(ids[0], /^session-[0-9a-f-]{36}$/);
 });
 
 test('只读角色报告改了文件，结果、渲染和账本都带违规', async () => {
