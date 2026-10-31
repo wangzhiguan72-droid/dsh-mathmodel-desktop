@@ -27,7 +27,7 @@ import { patchDesktopUpdateProfile } from './patch-desktop-update-entry.mjs';
 import { patchWebAllDesktopLinksProfile, patchSshDesktopLinksProfile } from './patch-web-all-desktop-links.mjs';
 import { finalizeSandboxAutoProfileManifest, stageSandboxAutoPlugin } from './stage-sandbox-auto.mjs';
 import { stageKimiDaemon } from './stage-kimi-daemon.mjs';
-import { finalizeKimiBrowserProfileManifest, stageKimiBrowserPlugin } from './stage-kimi-browser.mjs';
+import { stageKimiBrowserPlugin } from './stage-kimi-browser.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
@@ -500,7 +500,8 @@ async function main() {
   stageSandboxAutoPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-auto-mode'));
   finalizeSandboxAutoProfileManifest(path.join(stagingRoot, 'profile-web'));
   stageKimiBrowserPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-better-browser'));
-  finalizeKimiBrowserProfileManifest(path.join(stagingRoot, 'profile-web'));
+  // The seed keeps file:../../plugins/dsh-better-browser: the plugin is on no npm
+  // registry, and applyProfileSeed provides that folder from the seeded copy.
   await patchSessionExternalEvents({ runtimeRoot: path.join(stagingRoot, 'host', 'node_modules') });
   if (!localOnly) {
     await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));

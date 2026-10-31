@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  finalizeKimiBrowserProfileManifest,
   kimiBrowserDigest,
   stageKimiBrowserPlugin,
   verifyStagedKimiBrowser,
@@ -41,17 +40,12 @@ test('Kimi browser staging copies only sealed runtime assets as real files', t =
   assert.throws(() => verifyStagedKimiBrowser(profile, vendor, lock), /mismatch/);
 });
 
-test('Kimi browser staging rejects unsafe targets and finalizes the seed dependency', t => {
+test('Kimi browser staging rejects unsafe targets', t => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-kimi-stage-'));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const profile = path.join(temp, 'profile');
   const scope = path.join(profile, 'node_modules', '@dsh-external');
   fs.mkdirSync(scope, { recursive: true });
-  const manifestFile = path.join(profile, 'package.json');
-  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'runtime', 'profile-web', 'package.json'), 'utf8'));
-  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
-  finalizeKimiBrowserProfileManifest(profile);
-  assert.equal(JSON.parse(fs.readFileSync(manifestFile, 'utf8')).dependencies['@dsh-external/dsh-better-browser'], '0.3.6');
   const outside = path.join(temp, 'outside');
   fs.mkdirSync(outside);
   fs.symlinkSync(outside, path.join(scope, 'dsh-better-browser'), process.platform === 'win32' ? 'junction' : 'dir');

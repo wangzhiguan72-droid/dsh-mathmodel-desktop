@@ -77,12 +77,3 @@ export function stageKimiBrowserPlugin(profileDir, pluginDir, lockFile = default
   console.log('[build-runtime] staged Kimi browser -> ' + path.relative(desktopDir, target));
 }
 
-export function finalizeKimiBrowserProfileManifest(profileDir) {
-  const file = path.join(profileDir, 'package.json');
-  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (!String(manifest.dependencies?.['@dsh-external/dsh-better-browser']).startsWith('file:')) {
-    throw new Error('Expected local Kimi browser build dependency');
-  }
-  manifest.dependencies['@dsh-external/dsh-better-browser'] = '0.3.6';
-  fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\n');
-}

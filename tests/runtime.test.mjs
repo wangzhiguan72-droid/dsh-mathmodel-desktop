@@ -199,6 +199,28 @@ test('applyProfileSeed points the seeded pnpm virtual store at the profile itsel
   }
 });
 
+test('applyProfileSeed provides the local plugin folders its file: dependencies point at', (t) => {
+  // The market's pnpm install resolves file:..\..\plugins\X against the user's
+  // home; a missing folder (ENOENT) leaves the whole node_modules empty.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-seed-plugins-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const seed = path.join(root, 'seed');
+  const profile = path.join(root, 'home', 'profiles', 'mathmodel');
+  const seeded = path.join(seed, 'node_modules', '@scope', 'missing');
+  fs.mkdirSync(seeded, { recursive: true });
+  fs.writeFileSync(path.join(seeded, 'package.json'), '{"name":"@scope/missing","version":"1.0.0"}');
+  fs.mkdirSync(path.join(seed, 'node_modules', 'present'), { recursive: true });
+  fs.writeFileSync(path.join(seed, 'node_modules', 'present', 'package.json'), '{"name":"present","version":"2.0.0"}');
+  fs.writeFileSync(path.join(seed, 'package.json'), JSON.stringify({ dependencies: {
+    '@scope/missing': 'file:..\\..\\plugins\\missing', present: 'file:../../plugins/present', registry: '1.0.0' } }));
+  const own = path.join(root, 'home', 'plugins', 'present');
+  fs.mkdirSync(own, { recursive: true });
+  fs.writeFileSync(path.join(own, 'package.json'), '{"name":"present","version":"dev"}');
+  applyProfileSeed(seed, profile, 'seed', 'seed', {});
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'home', 'plugins', 'missing', 'package.json'), 'utf8')).version, '1.0.0');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(own, 'package.json'), 'utf8')).version, 'dev', 'an existing folder is the user\'s');
+});
+
 test('applyProfileSeed rejects an external profile junction before seed or reseed writes', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-external-profile-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

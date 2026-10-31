@@ -544,6 +544,17 @@ function applyProfileSeed(seedDir, profileDir, action, stamp, extra) {
     fs.writeFileSync(modulesYaml, fs.readFileSync(modulesYaml, 'utf8')
       .replace(/^virtualStoreDir: .*?(\r?)$/m, (_, cr) => `virtualStoreDir: ${virtualStore}${cr}`));
   }
+  // Bundled plugins are file:..\..\plugins\X dependencies; that pnpm install
+  // fails with ENOENT (and leaves node_modules empty) unless each folder
+  // exists. Fill missing ones from the seeded copy; existing ones are the user's.
+  const manifestFile = path.join(profileDir, 'package.json');
+  const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile, 'utf8')) : {};
+  for (const [name, spec] of Object.entries(manifest.dependencies ?? {})) {
+    if (!/^file:\.\.[\\/]\.\.[\\/]plugins[\\/]/.test(spec)) continue;
+    const target = path.resolve(profileDir, spec.slice('file:'.length));
+    const seeded = path.join(profileDir, 'node_modules', ...name.split('/'));
+    if (!fs.existsSync(target) && fs.existsSync(seeded)) fs.cpSync(seeded, target, { recursive: true, dereference: true });
+  }
   const marker = { stamp, seededAt: new Date().toISOString(), ...extra };
   fs.writeFileSync(path.join(profileDir, SEED_MARKER), JSON.stringify(marker, null, 2) + '\n');
 }
