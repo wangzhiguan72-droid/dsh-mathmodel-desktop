@@ -1,5 +1,5 @@
 // One real delegate round-trip on the installed desktop Host (the user's own profile).
-// Usage: node scripts/smoke-installed-handoff.mjs <empty workspace dir>
+// Usage: node scripts/smoke-installed-handoff.mjs <empty workspace dir> [explore|review]
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +22,9 @@ await client.rpc('session', 'rename', { request: { sessionId, title: '交接冒�
 await client.rpc('session', 'selectModel', { request: { sessionId, ...LEAD } });
 const preview = await client.rpc('mathmodelHostCapabilities', 'describe', { sessionId });
 await client.rpc('mathmodelHostCapabilities', 'confirm', { sessionId, preset: 'task', hostHash: preview.hostHash });
-const prompt = '用 delegate 派一个 role=explore 的交接：查 price.js 的 toYuan 换算是否正确（分转元）。不要自己读文件，只派这一次，然后用一句话告诉我回执结论。';
+// Optional second argument picks the role: explore runs on Flash, review on Astra.
+const role = process.argv[3] ?? 'explore';
+const prompt = `用 delegate 派一个 role=${role} 的交接：查 price.js 的 toYuan 换算是否正确（分转元）。不要自己读文件，只派这一次，然后用一句话告诉我回执结论。`;
 await client.rpc('session', 'prompt', { request: { sessionId, requestId: randomUUID(), mode: 'queue', content: [{ type: 'text', text: prompt }], clientTimeZone: 'Asia/Shanghai' } });
 
 const start = Date.now();
