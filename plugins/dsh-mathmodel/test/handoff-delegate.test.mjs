@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis';
 import { ToolRuntime } from '../../../resources/runtime/host/node_modules/@deepseek-ai/dsh-tools/lib/index.js';
 import { apply, writeLocks, children } from '../src/handoff.js';
 
-const KNOWN = new Set(['magpie']);
+const KNOWN = new Set(['magpie', 'wanzhao-astra']);
 const receipt = (files = [], extra = {}) => ({ status: 'done', summary: 's', findings: [], files_changed: files, commands_run: [], not_verified: [], open_questions: [], ...extra });
 
 function setup(config = {}, startActivation) {
@@ -54,7 +54,7 @@ test('按角色选路线，带上 outputSchema、预留 childId 与 caller 交�
   assert.equal(spec.delivery, 'caller');
   assert.equal(spec.childId, 'id-1');
   assert.equal(spec.request.parent.id, 'p1');
-  assert.deepEqual(spec.request.agentOptions, { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' });
+  assert.deepEqual(spec.request.agentOptions, { provider: 'wanzhao-astra', model: 'gpt-6-astra' });
   assert.ok(spec.request.outputSchema.required.includes('verdict'));
   assert.match(spec.request.prompt[0].text, /看不到主对话/);
   assert.equal(r.verdict, 'pass');

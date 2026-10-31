@@ -122,7 +122,7 @@ export function childGuard(exec) {
 export const name = 'dsh-handoff';
 export const inject = ['tools', 'subagents', 'systemPrompt', 'workingDirectory'];
 const FLASH = { provider: 'magpie', model: 'workbuddy-ai/deepseek-v4.1-flash' };
-const ASTRA = { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' };
+const ASTRA = { provider: 'wanzhao-astra', model: 'gpt-6-astra' };
 export const DEFAULT_ROLES = Object.freeze({ explore: FLASH, implement: FLASH, review: ASTRA, escalate: ASTRA });
 const Route = Schema.object({ provider: Schema.string().required(), model: Schema.string().required(), reasoningEffort: Schema.string() });
 export const Config = Schema.object({

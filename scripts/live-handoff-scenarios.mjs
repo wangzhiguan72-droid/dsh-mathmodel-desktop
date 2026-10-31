@@ -20,9 +20,9 @@ const YAML = createRequire(path.join(runtimeRoot, '__live_handoff__.cjs'))('yaml
 // --all-flash: every route on Flash. Checks the handoff mechanics only, not Astra's review quality.
 const ALL_FLASH = process.argv.includes('--all-flash');
 const FLASH = { provider: 'magpie', model: 'workbuddy-ai/deepseek-v4.1-flash' };
-const LEAD = ALL_FLASH ? FLASH : { provider: 'magpie', model: 'workbuddy-ai/gpt-6-astra' };
-// The lead and both handoff routes; the rest of the user's Magpie list is not needed here.
-const ROUTES = new Set(['workbuddy-ai/gpt-6-astra', 'workbuddy-ai/deepseek-v4.1-flash']);
+const LEAD = ALL_FLASH ? FLASH : { provider: 'wanzhao-astra', model: 'gpt-6-astra' };
+// Flash is the only Magpie route needed; Astra comes from its own provider.
+const ROUTES = new Set(['workbuddy-ai/deepseek-v4.1-flash']);
 const TURN_TIMEOUT_MS = 15 * 60 * 1000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const named = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -142,18 +142,22 @@ ensureFrameworkCohort(home, host, 'mathmodel', 'live-handoff');
 ensureProfileFallbacks(home, host, 'mathmodel');
 // A real copy (not a link) of the knowledge base, so nothing here can reach the user's files.
 fs.cpSync(path.join(os.homedir(), '.dsh-mathmodel/skills/math-modeling'), path.join(home, 'skills/math-modeling'), { recursive: true, dereference: true });
-// Only the Magpie route and key enter this store.
+// Only the Magpie and Astra routes and their keys enter this store.
 const userPatch = YAML.parse(fs.readFileSync(path.join(os.homedir(), '.dsh-mathmodel/profiles/mathmodel/cordis.patch.yml'), 'utf8'));
-const magpie = userPatch.find(row => row.id === 'llm-pi-ai')?.config?.providers?.magpie;
+const providers = userPatch.find(row => row.id === 'llm-pi-ai')?.config?.providers;
+const magpie = providers?.magpie, astra = providers?.['wanzhao-astra'];
 assert.ok(magpie?.baseURL?.startsWith('http://127.0.0.1:'), 'Magpie provider not found in the user profile');
+assert.ok(astra?.models?.some(model => model.id === 'gpt-6-astra'), 'wanzhao-astra provider not found in the user profile');
 const credentials = YAML.parse(fs.readFileSync(path.join(os.homedir(), '.dsh-mathmodel/.credentials.yaml'), 'utf8'));
-assert.ok(credentials.refs?.MAGPIE_GATEWAY_KEY, 'MAGPIE_GATEWAY_KEY reference missing');
-fs.writeFileSync(path.join(home, '.credentials.yaml'), YAML.stringify({ version: 1, refs: { MAGPIE_GATEWAY_KEY: credentials.refs.MAGPIE_GATEWAY_KEY } }), { mode: 0o600 });
+const keys = Object.fromEntries([magpie.apiKeyEnv, astra.apiKeyEnv].map(name => [name, credentials.refs?.[name]]));
+for (const [name, value] of Object.entries(keys)) assert.ok(value, `${name} reference missing`);
+fs.writeFileSync(path.join(home, '.credentials.yaml'), YAML.stringify({ version: 1, refs: keys }), { mode: 0o600 });
 // Unattended: file sandbox stays on, any escalation is refused instead of waiting for a click.
 fs.appendFileSync(patch, `\n${YAML.stringify([
   { id: 'llm-pi-ai', config: { providers: { magpie: { ...magpie, models: magpie.models.filter(model => ROUTES.has(model.id)).map(model => ({ ...model,
     // The seed llm-pi-ai schema knows only these effort names.
-    ...(model.reasoningEfforts ? { reasoningEfforts: Object.fromEntries(Object.entries(model.reasoningEfforts).filter(([key]) => ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(key))) } : {}) })) } } } },
+    ...(model.reasoningEfforts ? { reasoningEfforts: Object.fromEntries(Object.entries(model.reasoningEfforts).filter(([key]) => ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(key))) } : {}) })) },
+    'wanzhao-astra': astra } } },
   { id: 'approval', config: { policy: 'never' } },
   { id: 'permission', config: { defaultPreset: 'unattended', presets: {
     'read-only': { sandbox: 'read-only', approval: 'ask' }, 'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
