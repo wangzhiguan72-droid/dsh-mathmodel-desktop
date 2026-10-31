@@ -182,6 +182,23 @@ test('applyProfileSeed keeps only the root user patch layer on reseed', () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(profile, SEED_MARKER), 'utf8')).stamp, 's2');
 });
 
+test('applyProfileSeed points the seeded pnpm virtual store at the profile itself', () => {
+  // A virtualStoreDir left pointing at the build machine makes the next
+  // `pnpm install` (plugin market update) purge the whole node_modules.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-seed-'));
+  const seed = path.join(dir, 'seed');
+  const profile = path.join(dir, 'web');
+  fs.mkdirSync(path.join(seed, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(seed, 'package.json'), '{}');
+  fs.writeFileSync(path.join(seed, 'node_modules', '.modules.yaml'),
+    'layoutVersion: 5\r\nvirtualStoreDir: D:\\build\\runtime\\profile-web\\node_modules\\.pnpm\r\nvirtualStoreDirMaxLength: 120\r\n');
+  for (const action of ['seed', 'reseed']) {
+    applyProfileSeed(seed, profile, action, action, {});
+    const yaml = fs.readFileSync(path.join(profile, 'node_modules', '.modules.yaml'), 'utf8');
+    assert.equal(yaml, `layoutVersion: 5\r\nvirtualStoreDir: ${path.join(profile, 'node_modules', '.pnpm')}\r\nvirtualStoreDirMaxLength: 120\r\n`, action);
+  }
+});
+
 test('applyProfileSeed rejects an external profile junction before seed or reseed writes', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-external-profile-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -536,6 +536,14 @@ function applyProfileSeed(seedDir, profileDir, action, stamp, extra) {
     dereference: true,
     filter: (source) => action !== 'reseed' || !keep(source),
   });
+  // pnpm records the build machine's virtual store path; left as is, the next
+  // `pnpm install` in this profile sees a mismatch and purges node_modules.
+  const modulesYaml = path.join(profileDir, 'node_modules', '.modules.yaml');
+  if (fs.existsSync(modulesYaml)) {
+    const virtualStore = path.join(profileDir, 'node_modules', '.pnpm');
+    fs.writeFileSync(modulesYaml, fs.readFileSync(modulesYaml, 'utf8')
+      .replace(/^virtualStoreDir: .*?(\r?)$/m, (_, cr) => `virtualStoreDir: ${virtualStore}${cr}`));
+  }
   const marker = { stamp, seededAt: new Date().toISOString(), ...extra };
   fs.writeFileSync(path.join(profileDir, SEED_MARKER), JSON.stringify(marker, null, 2) + '\n');
 }
