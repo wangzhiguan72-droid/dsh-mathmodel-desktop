@@ -536,13 +536,17 @@ function applyProfileSeed(seedDir, profileDir, action, stamp, extra) {
     dereference: true,
     filter: (source) => action !== 'reseed' || !keep(source),
   });
-  // pnpm records the build machine's virtual store path; left as is, the next
-  // `pnpm install` in this profile sees a mismatch and purges node_modules.
+  // pnpm records the build machine's store and virtual store paths; left as
+  // is, the next `pnpm install` in this profile sees a mismatch and purges
+  // node_modules. The store is the seed workspace's `storeDir: ../../.pnpm-store`
+  // under the layout directory of the bundled pnpm 11.
   const modulesYaml = path.join(profileDir, 'node_modules', '.modules.yaml');
   if (fs.existsSync(modulesYaml)) {
     const virtualStore = path.join(profileDir, 'node_modules', '.pnpm');
+    const store = path.resolve(profileDir, '..', '..', '.pnpm-store', 'v11');
     fs.writeFileSync(modulesYaml, fs.readFileSync(modulesYaml, 'utf8')
-      .replace(/^virtualStoreDir: .*?(\r?)$/m, (_, cr) => `virtualStoreDir: ${virtualStore}${cr}`));
+      .replace(/^virtualStoreDir: .*?(\r?)$/m, (_, cr) => `virtualStoreDir: ${virtualStore}${cr}`)
+      .replace(/^storeDir: .*?(\r?)$/m, (_, cr) => `storeDir: ${store}${cr}`));
   }
   // Bundled plugins are file:..\..\plugins\X dependencies; that pnpm install
   // fails with ENOENT (and leaves node_modules empty) unless each folder

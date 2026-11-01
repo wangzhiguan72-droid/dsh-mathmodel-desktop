@@ -233,13 +233,6 @@ async function boot() {
   pushLogLine('[desktop] dsh home: ' + home);
   pushLogLine('[desktop] Electron user data: ' + app.getPath('userData'));
   pushLogLine('[desktop] Electron session data: ' + app.getPath('sessionData'));
-  if (process.env.DSH_DESKTOP_VERIFY !== '1') {
-    try {
-      const bridge = await require('./kimi-bridge.cjs').ensureKimiBridge({resourcesRoot: resourcesRoot()});
-      pushLogLine('[desktop] Kimi browser bridge: ' + (bridge.running ? (bridge.extension_connected ? 'extension connected' : 'waiting for browser extension') : bridge.reason));
-    } catch { pushLogLine('[desktop] Kimi browser bridge unavailable; start it or check the browser extension.'); }
-  }
-  pushLogLine(startupTiming.stage('kimi'));
 
   if (process.platform === 'win32' && !checkVcRuntime()) {
     pushLogLine('[desktop] warning: Visual C++ runtime (vcruntime140.dll) is missing');

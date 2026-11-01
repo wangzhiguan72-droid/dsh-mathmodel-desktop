@@ -75,11 +75,10 @@ if (!bridge) {
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/lib/client.js',
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/cordis.patch.yml',
     ]) { required.push(relative); compareFromZip.push(relative); }
-    if (['0.1.7', '0.1.8', '0.1.9', '0.2.0'].includes(desktop.version)) {
+    if (['0.2.0'].includes(desktop.version)) {
       for (const relative of [
-        'resources/runtime/profile-web/node_modules/@dsh-external/dsh-better-browser/package.json',
-        'resources/runtime/profile-web/node_modules/@dsh-external/dsh-better-browser/lib/index.js',
-        'resources/runtime/kimi-webbridge/kimi-webbridge.exe',
+        'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/package.json',
+        'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/lib/index.mjs',
       ]) { required.push(relative); compareFromZip.push(relative); }
     }
   }

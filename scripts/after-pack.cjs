@@ -69,9 +69,6 @@ async function copyStagedRuntime(context, sourceRoot, fusionPluginDir, fusionLoc
   // The reseed contract compares the seeded profile's stamp against this file;
   // without it a packaged app would never reseed after a runtime bump.
   copyPayload(path.join(sourceRoot, 'VERSION.json'), path.join(runtimeRoot, 'VERSION.json'));
-  if (os === 'win' && fs.existsSync(path.join(sourceRoot, 'kimi-webbridge', 'kimi-webbridge.exe'))) {
-    copyPayload(path.join(sourceRoot, 'kimi-webbridge'), path.join(runtimeRoot, 'kimi-webbridge'));
-  }
 
   assertDestFile(path.join(runtimeRoot, 'node', os === 'win' ? 'node.exe' : path.join('bin', 'node')));
   // The bundled toolchain (npm from the official distribution, pnpm staged by
@@ -94,8 +91,5 @@ exports.configureArchiveFilter = configureArchiveFilter;
 exports.default = async context => {
   const { verifyStagedSandboxAuto } = await import('./stage-sandbox-auto.mjs');
   verifyStagedSandboxAuto(path.join(stagingRoot, 'profile-web'), path.join(__dirname, '..', 'plugins', 'dsh-auto-mode'));
-  const { verifyStagedKimiBrowser } = await import('./stage-kimi-browser.mjs');
-  verifyStagedKimiBrowser(path.join(stagingRoot, 'profile-web'), path.join(__dirname, '..', 'plugins', 'dsh-better-browser'));
-  assertDestFile(path.join(stagingRoot, 'kimi-webbridge', 'kimi-webbridge.exe'));
   return copyStagedRuntime(context, stagingRoot, path.join(__dirname, '..', 'plugins', 'dsh-model-fusion'));
 };

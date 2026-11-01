@@ -182,20 +182,21 @@ test('applyProfileSeed keeps only the root user patch layer on reseed', () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(profile, SEED_MARKER), 'utf8')).stamp, 's2');
 });
 
-test('applyProfileSeed points the seeded pnpm virtual store at the profile itself', () => {
-  // A virtualStoreDir left pointing at the build machine makes the next
-  // `pnpm install` (plugin market update) purge the whole node_modules.
+test('applyProfileSeed points the seeded pnpm store and virtual store at this home', () => {
+  // A storeDir or virtualStoreDir left pointing at the build machine makes the
+  // next `pnpm install` (plugin market update) purge the whole node_modules.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-seed-'));
   const seed = path.join(dir, 'seed');
-  const profile = path.join(dir, 'web');
+  const profile = path.join(dir, 'home', 'profiles', 'web');
   fs.mkdirSync(path.join(seed, 'node_modules'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'package.json'), '{}');
   fs.writeFileSync(path.join(seed, 'node_modules', '.modules.yaml'),
-    'layoutVersion: 5\r\nvirtualStoreDir: D:\\build\\runtime\\profile-web\\node_modules\\.pnpm\r\nvirtualStoreDirMaxLength: 120\r\n');
+    'layoutVersion: 5\r\nstoreDir: D:\\.pnpm-store\\v3\r\nvirtualStoreDir: D:\\build\\runtime\\profile-web\\node_modules\\.pnpm\r\nvirtualStoreDirMaxLength: 120\r\n');
   for (const action of ['seed', 'reseed']) {
     applyProfileSeed(seed, profile, action, action, {});
     const yaml = fs.readFileSync(path.join(profile, 'node_modules', '.modules.yaml'), 'utf8');
-    assert.equal(yaml, `layoutVersion: 5\r\nvirtualStoreDir: ${path.join(profile, 'node_modules', '.pnpm')}\r\nvirtualStoreDirMaxLength: 120\r\n`, action);
+    // storeDir follows the seed workspace's `storeDir: ../../.pnpm-store` (pnpm 11 layout v11).
+    assert.equal(yaml, `layoutVersion: 5\r\nstoreDir: ${path.join(dir, 'home', '.pnpm-store', 'v11')}\r\nvirtualStoreDir: ${path.join(profile, 'node_modules', '.pnpm')}\r\nvirtualStoreDirMaxLength: 120\r\n`, action);
   }
 });
 
@@ -378,3 +379,22 @@ test('checkVcRuntime detects presence or absence of vcruntime140.dll', () => {
 });
 
 
+
+test('seed workspace carries the pnpm 11 settings the bundled host pnpm reads', () => {
+  // The desktop host runs its bundled pnpm 11, which ignores .npmrc and
+  // package.json "pnpm". Any setting missing here differs from the pnpm 9
+  // build's node_modules/.modules.yaml and the next market install purges it.
+  const root = path.resolve(import.meta.dirname, '..');
+  const seed = path.join(root, 'runtime', 'profile-web');
+  const yaml = fs.readFileSync(path.join(seed, 'pnpm-workspace.yaml'), 'utf8');
+  assert.match(yaml, /^storeDir: \.\.\/\.\.\/\.pnpm-store$/m);
+  assert.match(yaml, /^virtualStoreDirMaxLength: 120$/m);
+  assert.match(yaml, /^publicHoistPattern:\n {2}- '\*eslint\*'\n {2}- '\*prettier\*'$/m);
+  const block = /^overrides:\n((?: {2}.*\n)+)/m.exec(yaml)[1].trimEnd().split('\n');
+  const overrides = Object.fromEntries(block.map(line => {
+    const [, name, version] = /^ {2}'([^']+)': '?([^']+?)'?$/.exec(line);
+    return [name, version];
+  }));
+  const manifest = JSON.parse(fs.readFileSync(path.join(seed, 'package.json'), 'utf8'));
+  assert.deepEqual(overrides, manifest.pnpm.overrides);
+});

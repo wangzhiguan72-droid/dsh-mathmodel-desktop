@@ -25,9 +25,7 @@ import { patchGitGraphProfile } from './patch-git-graph.mjs';
 import { patchSessionExternalEvents } from './patch-session-external-events.mjs';
 import { patchDesktopUpdateProfile } from './patch-desktop-update-entry.mjs';
 import { patchWebAllDesktopLinksProfile, patchSshDesktopLinksProfile } from './patch-web-all-desktop-links.mjs';
-import { finalizeSandboxAutoProfileManifest, stageSandboxAutoPlugin } from './stage-sandbox-auto.mjs';
-import { stageKimiDaemon } from './stage-kimi-daemon.mjs';
-import { stageKimiBrowserPlugin } from './stage-kimi-browser.mjs';
+import { assertSandboxAutoProfileManifest, stageSandboxAutoPlugin } from './stage-sandbox-auto.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
@@ -498,10 +496,7 @@ async function main() {
   fs.copyFileSync(path.join(desktopDir, 'src', 'host-compile-cache.cjs'), path.join(stagingRoot, 'host', 'startup-cache.cjs'));
   stageFusionPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-model-fusion'));
   stageSandboxAutoPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-auto-mode'));
-  finalizeSandboxAutoProfileManifest(path.join(stagingRoot, 'profile-web'));
-  stageKimiBrowserPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-better-browser'));
-  // The seed keeps file:../../plugins/dsh-better-browser: the plugin is on no npm
-  // registry, and applyProfileSeed provides that folder from the seeded copy.
+  assertSandboxAutoProfileManifest(path.join(stagingRoot, 'profile-web'));
   await patchSessionExternalEvents({ runtimeRoot: path.join(stagingRoot, 'host', 'node_modules') });
   if (!localOnly) {
     await patchGitGraphProfile(path.join(stagingRoot, 'profile-web'));
@@ -518,7 +513,6 @@ async function main() {
     webAll: '@linxin666/dsh-web-all@' + webAllVersion,
     builtAt: new Date().toISOString(),
   };
-  stageKimiDaemon();
   fs.mkdirSync(stagingRoot, { recursive: true });
   fs.writeFileSync(path.join(stagingRoot, 'VERSION.json'), JSON.stringify(stamp, null, 2) + '\n');
   console.log('[build-runtime] runtime payload ready: ' + stamp.host + ' + ' + stamp.webAll);

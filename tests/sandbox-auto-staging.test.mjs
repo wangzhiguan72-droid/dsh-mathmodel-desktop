@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stageSandboxAutoPlugin, verifyStagedSandboxAuto, sandboxAutoDigest, finalizeSandboxAutoProfileManifest } from '../scripts/stage-sandbox-auto.mjs';
+import { stageSandboxAutoPlugin, verifyStagedSandboxAuto, sandboxAutoDigest, assertSandboxAutoProfileManifest } from '../scripts/stage-sandbox-auto.mjs';
 
-test('fresh profile selects both Auto bundles and pins Sandbox Auto exactly in seed', t => {
+test('fresh profile selects both Auto bundles and keeps Sandbox Auto local in seed', t => {
   const root = path.resolve(import.meta.dirname, '..');
   const profile = JSON.parse(fs.readFileSync(path.join(root, 'runtime/profile-web/package.json'), 'utf8'));
   assert.match(profile.dependencies['@nanmicoder/dsh-auto-mode'], /^file:/);
@@ -15,8 +15,10 @@ test('fresh profile selects both Auto bundles and pins Sandbox Auto exactly in s
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-sandbox-profile-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(profile));
-  finalizeSandboxAutoProfileManifest(tmp);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'))).dependencies['@nanmicoder/dsh-auto-mode'], '0.2.0');
+  assertSandboxAutoProfileManifest(tmp);
+  // npm 0.2.0 lacks the rc.5 adaptation; a registry spec would replace it on the first market install.
+  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ dependencies: { '@nanmicoder/dsh-auto-mode': '0.2.0' } }));
+  assert.throws(() => assertSandboxAutoProfileManifest(tmp), /local sandbox Auto/);
 });
 
 test('vendored 0.2.0 distribution matches its sealed build artifact', () => {

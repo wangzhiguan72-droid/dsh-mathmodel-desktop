@@ -77,12 +77,11 @@ export function stageSandboxAutoPlugin(profileDir, pluginDir, lockFile = default
   console.log('[build-runtime] staged sandbox Auto -> ' + path.relative(desktopDir, target));
 }
 
-export function finalizeSandboxAutoProfileManifest(profileDir) {
-  const file = path.join(profileDir, 'package.json');
-  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+// The seed keeps file:..\..\plugins\dsh-auto-mode: npm 0.2.0 lacks the rc.5
+// adaptation, and applyProfileSeed provides that folder from the seeded copy.
+export function assertSandboxAutoProfileManifest(profileDir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8'));
   if (!String(manifest.dependencies?.['@nanmicoder/dsh-auto-mode']).startsWith('file:')) {
-    throw new Error('Expected local sandbox Auto build dependency');
+    throw new Error('Expected local sandbox Auto dependency');
   }
-  manifest.dependencies['@nanmicoder/dsh-auto-mode'] = '0.2.0';
-  fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\n');
 }

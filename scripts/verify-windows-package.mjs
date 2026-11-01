@@ -278,8 +278,8 @@ async function start(appDir, phase) {
   for (const moduleName of ['@deepseek-ai/dsh-experimental-auto-review', '@nanmicoder/dsh-auto-mode']) {
     assert.ok(allPlugins.some(row => row.moduleName === moduleName && row.enabled && row.fiberPhase === 'active'), `Fresh package plugin is inactive: ${moduleName}`);
   }
-  if (fs.existsSync(path.join(appDir, 'resources/runtime/kimi-webbridge/kimi-webbridge.exe'))) {
-    assert.ok(allPlugins.some(row => row.moduleName === '@dsh-external/dsh-better-browser' && row.enabled && row.fiberPhase === 'active'), 'Kimi browser adapter is not active');
+  if (fs.existsSync(path.join(appDir, 'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/package.json'))) {
+    assert.ok(allPlugins.some(row => row.moduleName === '@wxg-prc-cpg/browser-skill-dsh-plugin' && row.enabled && row.fiberPhase === 'active'), 'BrowserSkill plugin is not active');
   }
   const expectedRows = ['0.4.11', '0.4.12'].includes(webFamilyVersion)
     // Fresh 0.4.11 defaults: every row active except the opt-in ssh and skill-explorer.
