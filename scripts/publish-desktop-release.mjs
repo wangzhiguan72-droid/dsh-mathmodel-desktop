@@ -17,6 +17,7 @@ const PRIOR_VERSION = '0.1.7';
 const EARLIER_VERSION = '0.1.8';
 const RECENT_VERSION = '0.1.9';
 const CURRENT_VERSION = '0.2.0';
+const NEXT_VERSION = '0.2.2-rc.3';
 const RELEASES = Object.freeze({
   [BRIDGE_VERSION]: { tag: `v${BRIDGE_VERSION}` },
   [KERNEL_VERSION]: { tag: `v${KERNEL_VERSION}` },
@@ -27,6 +28,7 @@ const RELEASES = Object.freeze({
   [EARLIER_VERSION]: { tag: `v${EARLIER_VERSION}` },
   [RECENT_VERSION]: { tag: `v${RECENT_VERSION}` },
   [CURRENT_VERSION]: { tag: `v${CURRENT_VERSION}` },
+  [NEXT_VERSION]: { tag: `v${NEXT_VERSION}` },
 });
 // Kernel feeds keep the bridge as their base route so pre-bridge installs migrate first.
 const BRIDGE_ZIP = `dsh-mathmodel-desktop-${BRIDGE_VERSION}-win-x64.zip`;
