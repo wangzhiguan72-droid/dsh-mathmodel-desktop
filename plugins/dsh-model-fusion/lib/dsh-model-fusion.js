@@ -14,14 +14,14 @@ import { DatabaseSync } from "node:sqlite";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { NativeToolExecutor } from "@deepseek-ai/dsh-tool-executor-native";
 import { toolPairingBalancedBefore } from "@deepseek-ai/dsh-compaction";
 import { JobId } from "@deepseek-ai/dsh-jobs";
 import { installModelSelection } from "@deepseek-ai/dsh-agent";
-//#region src/bilingual.ts
+// src/bilingual.ts
 /** Host-side messages reach the UI and the command line as text; they carry both languages. */
 const bi = (zh, en) => `${zh} / ${en}`;
-//#endregion
-//#region src/digest.ts
+// src/digest.ts
 function sha256Hex(data) {
 	return createHash("sha256").update(data).digest("hex");
 }
@@ -39,8 +39,7 @@ function canonicalJson(value) {
 function digestOf(value) {
 	return sha256Hex(canonicalJson(value));
 }
-//#endregion
-//#region src/errors.ts
+// src/errors.ts
 var FusionError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -69,8 +68,7 @@ const REVIEW_RESULT_CONFLICT = "REVIEW_RESULT_CONFLICT";
 const REVIEW_TICKET_REQUIRED = "REVIEW_TICKET_REQUIRED";
 const WORK_ORDER_CONFLICT = "WORK_ORDER_CONFLICT";
 const STORE_MIGRATION_REQUIRED = "STORE_MIGRATION_REQUIRED";
-//#endregion
-//#region src/usage/ledger.ts
+// src/usage/ledger.ts
 const known = (tokens) => ({
 	state: "known",
 	tokens: safeTokens(tokens)
@@ -162,7 +160,7 @@ function addWrites(first, second) {
 		};
 	}
 	requireThat$3(first.kind === "details" && second.kind === "details", "CACHE_LAYOUT_CONFLICT");
-	const keys = [...new Set([...Object.keys(first.buckets), ...Object.keys(second.buckets)])].sort();
+	const keys = [.../* @__PURE__ */ new Set([...Object.keys(first.buckets), ...Object.keys(second.buckets)])].sort();
 	return {
 		kind: "details",
 		buckets: Object.fromEntries(keys.map((key) => {
@@ -263,8 +261,7 @@ function splitInput(total, cached, includesCache) {
 	requireThat$3(cached.tokens <= total.tokens, "CACHE_EXCEEDS_INPUT");
 	return known(total.tokens - cached.tokens);
 }
-//#endregion
-//#region src/host/history.ts
+// src/host/history.ts
 function taskSummary(state, createdAt, updatedAt) {
 	return {
 		id: state.taskId,
@@ -399,8 +396,7 @@ function readHistory(store, cursor = "", limit = 20) {
 		upstreamHttpCalls: null
 	};
 }
-//#endregion
-//#region src/host/native-selection.ts
+// src/host/native-selection.ts
 const FUSION_PROVIDER = "dsh-model-fusion";
 const FUSION_MODEL = "auto";
 const isFusionSelection = (route) => route?.provider === "dsh-model-fusion" && route.model === "auto";
@@ -424,7 +420,7 @@ var FusionCatalogAdapter = class extends LlmAdapter {
 			id: FUSION_MODEL,
 			name: "Fusion · 自动",
 			description: "Lead 与 Worker 协作。在设置 → Fusion 中配置模型。",
-			inputModalities: [...new Set(["text", ...lead])]
+			inputModalities: [.../* @__PURE__ */ new Set(["text", ...lead])]
 		}];
 	}
 	async resolveModel(provider, model) {
@@ -449,7 +445,8 @@ function installNativeFusionSelection(ctx, input) {
 		if (isFusionSelection(route)) {
 			if (!selected(agent) && profile) coordinator.selectBeforeAssembly(agent, profile);
 			if (selected(agent)) {
-				if (!isFusionSelection(agent.session.snapshotEvents().findLast((event) => event.type === "model/selection")?.data)) agent.session.append("model/selection", {
+				const intent = agent.session.snapshotEvents().findLast((event) => event.type === "model/selection");
+				if (!isFusionSelection(intent?.data)) agent.session.append("model/selection", {
 					provider: FUSION_PROVIDER,
 					model: FUSION_MODEL
 				});
@@ -510,8 +507,7 @@ function installNativeFusionSelection(ctx, input) {
 		for (const dispose of disposers.reverse()) dispose();
 	};
 }
-//#endregion
-//#region src/profile/keepalive.ts
+// src/profile/keepalive.ts
 /** No provider-name heuristic can establish cache support for a DSH route. */
 function keepaliveChoice(value) {
 	if (value === void 0) return void 0;
@@ -524,8 +520,7 @@ function keepaliveChoice(value) {
 		worker: raw.worker
 	};
 }
-//#endregion
-//#region src/profile/compactor.ts
+// src/profile/compactor.ts
 /** A separate summary model is never inferred from a provider name or enabled by default. */
 function compactorChoice(value) {
 	if (value === void 0) return void 0;
@@ -553,8 +548,7 @@ function profileRoutes(profile) {
 		...profile.compactor ? [profile.compactor.route] : []
 	];
 }
-//#endregion
-//#region src/host/settings.ts
+// src/host/settings.ts
 /** Saved Lead route from a raw settings or profile document, or undefined when unconfigured or pointed at Fusion itself. */
 function savedLeadRoute(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
@@ -639,8 +633,7 @@ function choiceFromProfile(profile) {
 		...profile.cacheKeepalive === void 0 ? {} : { cacheKeepalive: profile.cacheKeepalive }
 	};
 }
-//#endregion
-//#region src/host/cache-defaults.ts
+// src/host/cache-defaults.ts
 /**
 * Default prompt-cache behaviour for the models most people pair in Fusion, from each provider's official
 * documentation. Matching uses the model id (stable across DSH setups), never the route name, except for the
@@ -890,7 +883,8 @@ function cacheDefaults(provider, model) {
 		source: "generic"
 	};
 }
-const MIN_INTERVAL = 60, MAX_INTERVAL = 3540;
+const MIN_INTERVAL = 60;
+const MAX_INTERVAL = 3540;
 /** A request reused its prefix when most of its input came from the cache. */
 const cacheHit = (cacheRead, input) => cacheRead > 0 && cacheRead / (cacheRead + input) >= .5;
 const key = (provider, model) => `${provider}\u0001${model}`;
@@ -1066,9 +1060,8 @@ function cacheView(policy, pair, pairChoice) {
 		};
 	});
 }
-//#endregion
-//#region src/profile/resolve.ts
-const PLACEHOLDERS = new Set([
+// src/profile/resolve.ts
+const PLACEHOLDERS = /* @__PURE__ */ new Set([
 	"__AUTHORIZED_PROVIDER__",
 	"__EXACT_MODEL_ID__",
 	"__EXACT_WORKER_ID__",
@@ -1172,8 +1165,7 @@ function resolveProfile(raw, prompts, catalog) {
 function loadJsonObject(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
 }
-//#endregion
-//#region src/prompts.ts
+// src/prompts.ts
 const here = dirname(fileURLToPath(import.meta.url));
 function defaultPromptDir() {
 	return join(here, "..", "prompts");
@@ -1199,8 +1191,7 @@ function promptManifest(dir = defaultPromptDir()) {
 		digests: promptDigests(prompts)
 	};
 }
-//#endregion
-//#region src/task/status-index.ts
+// src/task/status-index.ts
 const metrics = [
 	"calls",
 	"finalCalls",
@@ -1474,8 +1465,7 @@ var StatusIndex = class {
 		return Boolean(this.#sql("SELECT 1 FROM fusion_status_facts_v1 WHERE task=? AND session=? AND active=1 LIMIT 1").get(task, session));
 	}
 };
-//#endregion
-//#region src/contracts.ts
+// src/contracts.ts
 function asBrand(raw) {
 	if (!raw || raw.includes("\0")) throw new TypeError("empty branded id");
 	return raw;
@@ -1488,20 +1478,19 @@ const ArtifactId = (raw) => asBrand(raw);
 const SnapshotId = (raw) => asBrand(raw);
 const EpochId = (raw) => asBrand(raw);
 const UsdDecimal = (raw) => raw;
-const TERMINAL_PHASES = new Set([
+const TERMINAL_PHASES = /* @__PURE__ */ new Set([
 	"COMPLETED",
 	"CANCELLED",
 	"FAILED"
 ]);
-//#endregion
-//#region src/review/protocol.ts
-const VALID_DECISIONS = new Set([
+// src/review/protocol.ts
+const VALID_DECISIONS = /* @__PURE__ */ new Set([
 	"approve",
 	"accept",
 	"rework",
 	"needs-decision"
 ]);
-const SUCCESS_REASONS = new Set([
+const SUCCESS_REASONS = /* @__PURE__ */ new Set([
 	"stop",
 	"end_turn",
 	"end-turn",
@@ -1510,24 +1499,24 @@ const SUCCESS_REASONS = new Set([
 	"completed",
 	"success"
 ]);
-const TRUNCATED_REASONS = new Set([
+const TRUNCATED_REASONS = /* @__PURE__ */ new Set([
 	"length",
 	"max_tokens",
 	"max_token"
 ]);
-const ABORTED_REASONS = new Set([
+const ABORTED_REASONS = /* @__PURE__ */ new Set([
 	"aborted",
 	"abort",
 	"cancelled",
 	"canceled",
 	"cancel"
 ]);
-const ERROR_REASONS = new Set([
+const ERROR_REASONS = /* @__PURE__ */ new Set([
 	"error",
 	"internal_error",
 	"server_error"
 ]);
-const FILTERED_REASONS = new Set([
+const FILTERED_REASONS = /* @__PURE__ */ new Set([
 	"content_filter",
 	"content-filter",
 	"filtered",
@@ -1647,8 +1636,7 @@ function reviewAttemptFields(input) {
 		deliveredArtifactSource
 	};
 }
-//#endregion
-//#region src/review/ticket.ts
+// src/review/ticket.ts
 function requireThat$2(value, code) {
 	if (!value) throw new FusionError(EVENT_CONFLICT, code);
 }
@@ -1780,9 +1768,8 @@ function assertCurrentSubject(state, ticket, actualSnapshot) {
 	requireThat$2(digestOf(state.validatedReceipt) === ticket.validationDigest, "READINESS_CHANGED");
 	requireThat$2(actualSnapshot === ticket.subject.snapshot, "WORKSPACE_CHANGED");
 }
-//#endregion
-//#region src/task/reducer.ts
-const WAITING = new Set([
+// src/task/reducer.ts
+const WAITING = /* @__PURE__ */ new Set([
 	"WAITING_APPROVAL",
 	"WAITING_USER",
 	"WAITING_BUDGET",
@@ -2252,7 +2239,7 @@ function applyBoundReviewResult(state, result, event) {
 function applyApprovalPending(state, event) {
 	const next = need(state, event);
 	const approval = event.payload.approval;
-	const pendingApprovalIds = [...new Set([...next.pendingApprovalIds, approval.id])];
+	const pendingApprovalIds = [.../* @__PURE__ */ new Set([...next.pendingApprovalIds, approval.id])];
 	return {
 		...waiting(next, "WAITING_APPROVAL"),
 		pendingApprovalIds,
@@ -2350,8 +2337,7 @@ function reduceAll(events) {
 	if (!state) throw new FusionError(EVENT_CONFLICT, "no events");
 	return state;
 }
-//#endregion
-//#region src/task/store.ts
+// src/task/store.ts
 const nodeIo = {
 	existsSync,
 	mkdirSync: (path) => mkdirSync(path, { recursive: true }),
@@ -2596,8 +2582,7 @@ function failingRenameIo(base, failOnce = true) {
 		}
 	};
 }
-//#endregion
-//#region src/task/sqlite-store.ts
+// src/task/sqlite-store.ts
 /** Durable Host backend. Every read is fresh; CAS and outbox writes share one transaction. */
 var SqliteFusionStore = class {
 	filename;
@@ -2874,8 +2859,7 @@ var SqliteFusionStore = class {
 		}
 	}
 };
-//#endregion
-//#region src/host/bindings.ts
+// src/host/bindings.ts
 function object(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Fusion session binding");
 	return value;
@@ -2966,8 +2950,7 @@ var BindingRepository = class {
 		return this.store.listDocumentIds("binding:").map((id) => this.read(id.slice(8)).binding).filter((row) => row.selected);
 	}
 };
-//#endregion
-//#region src/host/worker-terminal.ts
+// src/host/worker-terminal.ts
 /** What fusion_wait should do once the resident Worker handle is already gone. */
 function absentWorkerOutcome(input) {
 	if (input.pendingEffects > 0 || input.outcomeUnknown) return {
@@ -3009,8 +2992,7 @@ function unsettledContinuationError(switching) {
 		en: "Interrupted operations are not confirmed finished; use /fusion recover first"
 	};
 }
-//#endregion
-//#region src/host/native-worker-notices.ts
+// src/host/native-worker-notices.ts
 /** Reduce only our Worker's runtime closing notice, never its structured report. */
 var NativeWorkerNotices = class {
 	store;
@@ -3084,8 +3066,7 @@ var NativeWorkerNotices = class {
 		}
 	}
 };
-//#endregion
-//#region src/execution/write-lease.ts
+// src/execution/write-lease.ts
 function canonicalWorkspace(cwd) {
 	return fs.realpathSync.native(cwd);
 }
@@ -3107,7 +3088,7 @@ var WorkspaceWriteLease = class {
 			const prior = this.#record(row, workspaceId);
 			if (prior) throw new FusionError(LEASE_BUSY, `workspace is held by ${prior.holder}; reconcile before handoff`);
 			if (row.generation === Number.MAX_SAFE_INTEGER) throw new FusionError(LEASE_GENERATION, "lease generation exhausted");
-			const refs = [...new Set([process.pid, ...input.liveProcessRefs ?? []])];
+			const refs = [.../* @__PURE__ */ new Set([process.pid, ...input.liveProcessRefs ?? []])];
 			if (refs.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) throw new FusionError(LEASE_BUSY, "invalid process reference");
 			const record = {
 				workspaceId,
@@ -3167,7 +3148,7 @@ var WorkspaceWriteLease = class {
 			mode: 448
 		});
 		const oldTemporary = leasePath(workspaceId, path.join(fs.existsSync("/tmp") ? "/tmp" : os.tmpdir(), "dsh-model-fusion-leases"));
-		for (const lock of new Set([legacy, oldTemporary])) try {
+		for (const lock of /* @__PURE__ */ new Set([legacy, oldTemporary])) try {
 			fs.lstatSync(lock);
 			throw new FusionError(LEASE_BUSY, "legacy writer lock requires explicit reconciliation");
 		} catch (error) {
@@ -3200,8 +3181,7 @@ function classifyEffect(kind) {
 	if (kind === "read-tool") return "read";
 	return "write";
 }
-//#endregion
-//#region src/review/dispatch.ts
+// src/review/dispatch.ts
 /**
 * Offline producer: persist the captured ticket and outbox row before any adapter send.
 * The model callback may read the latest TaskState only for seq/CAS.
@@ -3235,8 +3215,7 @@ function appendCapturedReviewResult(store, taskId, ticket, outcome) {
 	});
 	return store.append(taskId, current.revision, [event]);
 }
-//#endregion
-//#region src/evidence/receipts.ts
+// src/evidence/receipts.ts
 function memoryVerificationRegistry(plans, receipts) {
 	const planById = new Map(plans.map((plan) => [plan.id, freezePlan(plan)]));
 	const receiptById = new Map(receipts.map((receipt) => [receipt.id, structuredClone(receipt)]));
@@ -3329,8 +3308,7 @@ function resolveInvocation(records) {
 function checkPlanDigest(plan) {
 	return digestOf(plan);
 }
-//#endregion
-//#region src/evidence/gate.ts
+// src/evidence/gate.ts
 const DEFAULT_TEST_VERIFIERS = [{
 	id: "pytest",
 	kind: "test",
@@ -3502,8 +3480,7 @@ function evaluateReport(workOrder, report, trustedRegistry, currentSnapshot, opt
 		reasons: []
 	};
 }
-//#endregion
-//#region src/host/workspace.ts
+// src/host/workspace.ts
 const SNAPSHOT_EXCLUSIONS = [
 	".git",
 	"node_modules",
@@ -3562,7 +3539,7 @@ function workspaceRelative(root, path) {
 	}
 }
 const MAX_ENTRIES = 2e5;
-const LARGE_FILE = 16 * 1024 * 1024;
+const LARGE_FILE = 16777216;
 /**
 * Source files git would consider (tracked plus untracked, minus the repository's ignore rules), relative
 * to root; undefined outside a git work tree or without git. Ignore rules are the project's own statement
@@ -3580,7 +3557,7 @@ function gitSourceFiles(root) {
 			"--exclude-standard"
 		], {
 			encoding: "buffer",
-			maxBuffer: 512 * 1024 * 1024,
+			maxBuffer: 536870912,
 			stdio: [
 				"ignore",
 				"pipe",
@@ -3661,7 +3638,7 @@ function changedPaths(before, after) {
 	if (before.root !== after.root) throw new Error("Workspace root changed");
 	const old = new Map(before.entries.map((entry) => [entry.path, digestOf(entry)]));
 	const now = new Map(after.entries.map((entry) => [entry.path, digestOf(entry)]));
-	return [...new Set([...old.keys(), ...now.keys()])].filter((path) => old.get(path) !== now.get(path)).sort();
+	return [.../* @__PURE__ */ new Set([...old.keys(), ...now.keys()])].filter((path) => old.get(path) !== now.get(path)).sort();
 }
 /**
 * Workspace-relative allowlist check. `/` always separates segments; `\` is a
@@ -3692,8 +3669,7 @@ function pathAllowed(path, allowed) {
 		return prefix !== void 0 && (prefix === "" || normalized === prefix || normalized.startsWith(`${prefix}/`));
 	});
 }
-//#endregion
-//#region src/host/shell.ts
+// src/host/shell.ts
 /**
 * The native shell tool the Host mounts on this platform. cordis.patch.yml
 * disables tool-bash on win32 and mounts tool-pwsh instead; elsewhere the
@@ -3704,8 +3680,7 @@ function pathAllowed(path, allowed) {
 const nativeShellTool = process.platform === "win32" ? "pwsh" : "bash";
 const isShellTool = (name) => name === "bash" || name === "pwsh";
 process.platform;
-//#endregion
-//#region src/host/native-checks.ts
+// src/host/native-checks.ts
 /** Parsers that name each failing test, which baseline-relative checks need. Mocha's default report spreads a name over several lines. */
 const BASELINE_PARSERS = [
 	"unittest",
@@ -3939,7 +3914,7 @@ function record(value) {
 	return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
 const execFileAsync = promisify(execFile);
-const WRAPPERS = new Set([
+const WRAPPERS = /* @__PURE__ */ new Set([
 	"env",
 	"exec",
 	"time",
@@ -3964,7 +3939,7 @@ const WRAPPER_VALUE_OPTIONS = {
 		"--output"
 	]
 };
-const PWSH_KEYWORDS = new Set([
+const PWSH_KEYWORDS = /* @__PURE__ */ new Set([
 	"exit",
 	"return",
 	"throw",
@@ -4131,18 +4106,34 @@ async function invokeCheck(input, check) {
 	const remove = input.authorizeNested(callId);
 	let result;
 	try {
-		result = await ctx.tools.execute({
+		const args = {
+			command: check.definition.command,
+			description: check.definition.description,
+			workdir: root,
+			...input.nativeTimeout && check.definition.timeoutSeconds === void 0 ? {} : { timeoutMs: (check.definition.timeoutSeconds ?? order.policy.commandMaxSeconds) * 1e3 },
+			run_in_background: false
+		};
+		if (typeof ctx.tools.resolve === "function") {
+			const batch = await ctx.tools.execute({
+				calls: [{
+					type: "tool-call",
+					id: callId,
+					name: nativeShellTool,
+					arguments: JSON.stringify(args)
+				}],
+				agent: exec.agent,
+				signal: exec.signal
+			});
+			const selected = batch.results.find((row) => row.callId === callId);
+			if (!selected) throw new Error("Native check batch omitted its exact call result");
+			for (const context of batch.additionalContexts) exec.deferContext(context);
+			result = selected.result;
+		} else result = await ctx.tools.execute({
 			callId,
 			rootCallId: exec.rootCallId,
 			parent: exec.token,
 			name: nativeShellTool,
-			arguments: {
-				command: check.definition.command,
-				description: check.definition.description,
-				workdir: root,
-				...input.nativeTimeout && check.definition.timeoutSeconds === void 0 ? {} : { timeoutMs: (check.definition.timeoutSeconds ?? order.policy.commandMaxSeconds) * 1e3 },
-				run_in_background: false
-			},
+			arguments: args,
 			agent: exec.agent,
 			signal: exec.signal
 		});
@@ -4293,8 +4284,7 @@ async function runNativeChecks(input) {
 		verdict: evaluateReport(order, report, [], order.mode === "text" ? report.snapshot : snapshotWorkspace(root).id, { registry })
 	};
 }
-//#endregion
-//#region src/host/native-review.ts
+// src/host/native-review.ts
 /** Capture before the Lead request starts; later tool callbacks cannot bind to a newer report. */
 function captureNativeReviewRequest(store, agent, turn, step, ticket) {
 	const id = `review-request:${agent.id}:${turn}:${step}`;
@@ -4343,8 +4333,7 @@ function nativeReviewProof(store, taskId, exec) {
 		finishReason: terminal.chunk.reason.kind === "tool-calls" ? "tool_calls" : "stop"
 	};
 }
-//#endregion
-//#region src/context/guard.ts
+// src/context/guard.ts
 function safetyTokens(contextWindow, policy, quality) {
 	const fromFraction = Math.ceil(contextWindow * policy.safetyFraction);
 	const base = Math.max(policy.minSafetyTokens, fromFraction);
@@ -4366,7 +4355,7 @@ function requestOutputReservation(contextWindow, requested, adapterDefault, test
 		testedCap,
 		fallback
 	]) if (limit !== void 0 && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Invalid model output token limit");
-	return Math.min(requested ?? adapterDefault ?? testedCap ?? fallback, adapterDefault ?? Infinity, testedCap ?? Infinity, fitted);
+	return Math.min(requested ?? adapterDefault ?? testedCap ?? fallback, adapterDefault ?? 1e400, testedCap ?? 1e400, fitted);
 }
 function inputBudget(policy, contextWindow, maxOutput, quality = "exact") {
 	const safety = safetyTokens(contextWindow, policy, quality);
@@ -4392,8 +4381,7 @@ function boundedOverflowRecovery(attempts) {
 	if (attempts.length === 2 && attempts[1].projectionTokens >= attempts[0].projectionTokens) return "needs-decision";
 	return "continue";
 }
-//#endregion
-//#region src/host/tool-table.ts
+// src/host/tool-table.ts
 /**
 * Rebuild one role's request tool table after another plugin replaces `assembled.tools`.
 *
@@ -4434,8 +4422,7 @@ function projectRoleTools(input) {
 function fusionToolDiagnostic(missing) {
 	return `FUSION_TOOL_TABLE_INCOMPLETE: required Fusion tools are absent from this request (${missing.join(", ")}). Another plugin replaced the tool table and Fusion could not restore them from its own registry. Do not tell the user that delegation is unavailable by design, and do not end the task as completed with no work. Report this diagnostic.`;
 }
-//#endregion
-//#region src/host/native-scopes.ts
+// src/host/native-scopes.ts
 /** Physical routing, prompt and tools live in the exact native Agent scope. */
 var NativeFusionScopes = class {
 	callbacks;
@@ -4489,10 +4476,24 @@ var NativeFusionScopes = class {
 			readOnlyTools = tools;
 			if (tools !== void 0) {
 				if (role === "worker") stageDisposers.push(scope.tools.restrict({ allow: tools }));
-				stageDisposers.push(scope.tools.presentAs("native"));
+				if (typeof scope.tools.presentAs === "function") stageDisposers.push(scope.tools.presentAs("native"));
 			}
 			presentationKey = key;
 		};
+		if (typeof scope.tools.resolve === "function") {
+			const native = new NativeToolExecutor(scope);
+			entry.dispose.push(scope.tools.setExecutor({
+				describe: (definitions) => {
+					const permitted = readOnlyTools === void 0 ? definitions : definitions.filter((definition) => readOnlyTools.includes(definition.name) || role === "worker" && [
+						"fusion_read_state",
+						"fusion_read_evidence",
+						"fusion_submit_result"
+					].includes(definition.name));
+					return native.describe(permitted);
+				},
+				execute: (input) => native.execute(input)
+			}));
+		}
 		entry.dispose.push(scope.tools.guard((exec) => {
 			if (!entry.ready) return "Fusion scope initialization failed";
 			return this.callbacks.canExecute(exec, entry.binding, role);
@@ -4532,8 +4533,9 @@ var NativeFusionScopes = class {
 			entry.refreshTools();
 			const assembled = await next();
 			const route = this.callbacks.route?.(entry.binding, role) ?? entry.binding.profile[role];
+			const treeTools = typeof scope.tools.resolve === "function";
 			const projected = projectRoleTools({
-				assembled: assembled.tools,
+				assembled: treeTools ? scope.tools.schemas(agent) : assembled.tools,
 				allowlist: readOnlyTools,
 				registry: scope.tools.schemas(agent),
 				always: role === "worker" ? [
@@ -4550,7 +4552,7 @@ var NativeFusionScopes = class {
 					provider: route.provider,
 					model: route.model
 				},
-				tools: projected.tools
+				...treeTools ? {} : { tools: projected.tools }
 			};
 		}, { prepend: true }));
 		entry.dispose.push(scope.on("agent/request", async ({ agent: requesting, turn, step, signal }, next) => {
@@ -4584,8 +4586,8 @@ var NativeFusionScopes = class {
 				...route.reasoningEffort === void 0 ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) }
 			};
 		}, { prepend: true }));
-		entry.refreshTools();
 		entry.dispose.push(...this.callbacks.installTools(scope, agent, entry.binding, role));
+		entry.refreshTools();
 		entry.ready = true;
 	}
 	/** Refresh at the persisted state transition, before native prompt providers run. */
@@ -4613,15 +4615,13 @@ var NativeFusionScopes = class {
 		this.#entries.delete(agent.id);
 	}
 };
-//#endregion
-//#region src/host/native-request.ts
+// src/host/native-request.ts
 /** Auxiliary native calls may carry a session without an active Agent turn. */
 function nativeRequestAgent(ctx, request) {
 	const initiator = ctx.agents.currentInitiator();
 	return (request.sessionId === void 0 ? void 0 : ctx.agents.get(request.sessionId)) ?? initiator;
 }
-//#endregion
-//#region src/context/handoff.ts
+// src/context/handoff.ts
 /**
 * Upper bound on recent conversation text carried into a Sidekick brief after compaction: about 10k tokens,
 * enough for the latest exchanges while leaving most of the Sidekick's context for the task itself.
@@ -4647,8 +4647,7 @@ function recentHandoffSuffix(records) {
 		records: records.slice(first)
 	};
 }
-//#endregion
-//#region src/host/native-worker-brief.ts
+// src/host/native-worker-brief.ts
 /** Durable Lead-authored refinements survive native compaction and request races. */
 function workerBriefs(store, taskId) {
 	const revision = (store.readDocument(`runtime:${taskId}`)?.value)?.briefRevision ?? 0;
@@ -4761,8 +4760,7 @@ function workerToolBriefProblem(store, taskId, exec, revision) {
 	const order = store.load(taskId)?.currentWorkOrder;
 	if (row.workOrderId !== order?.id && (row.workOrderId || order?.mode)) return "A newer work order superseded this request; process its plan before further tools";
 }
-//#endregion
-//#region src/host/native-task-context.ts
+// src/host/native-task-context.ts
 const FUSION_TASK_CONTEXT = "fusion:task";
 /** Keep identity, control and freshness; drop bodies already present in native history. */
 function compactFacts(facts, role) {
@@ -4807,11 +4805,12 @@ var NativeTaskContext = class {
 		this.store = store;
 		this.parent = parent;
 	}
-	begin(agent, taskId) {
+	begin(agent, taskId, firstSeq = agent.session.seq) {
+		if (!Number.isSafeInteger(firstSeq) || firstSeq < 0 || firstSeq > agent.session.seq) throw new Error("Fusion task input boundary requires reconciliation");
 		this.store.writeDocument(`task-origin:${taskId}`, 0, {
 			schemaVersion: 1,
 			sessionId: agent.id,
-			firstSeq: agent.session.seq
+			firstSeq
 		});
 	}
 	/**
@@ -5036,8 +5035,7 @@ var NativeTaskContext = class {
 		})}`;
 	}
 };
-//#endregion
-//#region src/host/native-compaction.ts
+// src/host/native-compaction.ts
 /**
 * Public llm/stream routing for the Host's mutable, one-shot summary envelope.
 * The Host still owns the compaction transaction and records this exact target.
@@ -5061,8 +5059,7 @@ function routeNativeCompaction(request, profile, effectiveRoute) {
 	else request.reasoningEffort = ReasoningEffortId(choice.route.reasoningEffort);
 	Object.freeze(request);
 }
-//#endregion
-//#region src/host/native-context.ts
+// src/host/native-context.ts
 /** Optional summary routing, then final admission and the Host's single compaction owner. */
 var NativeContextGuard = class {
 	ctx;
@@ -5107,7 +5104,7 @@ var NativeContextGuard = class {
 			source: { kind: "plugin:dsh-model-fusion" }
 		}));
 		const fixed = (system ? text(system) : 0) + (tools?.length ? text(JSON.stringify(tools)) : 0);
-		const actual = messages.reduce((total, message) => total + meter.estimateMessage(message.id ? message : createUserMessage({
+		const actual = messages.reduce((total, message) => total + meter.estimateMessage(message.role !== "user" || message.id !== void 0 ? message : createUserMessage({
 			content: message.content,
 			source: { kind: "plugin:dsh-model-fusion" }
 		})), 0) + fixed;
@@ -5166,7 +5163,10 @@ var NativeContextGuard = class {
 					type: "finish",
 					reason: {
 						kind: "error",
-						failure: new LlmError(reason, "FUSION_CONTEXT_UNAVAILABLE").failure
+						failure: LlmError.fromFailure({
+							message: reason,
+							code: "FUSION_CONTEXT_UNAVAILABLE"
+						}).failure
 					}
 				};
 				return;
@@ -5195,7 +5195,10 @@ var NativeContextGuard = class {
 					type: "finish",
 					reason: {
 						kind: "error",
-						failure: new LlmError(reason, FUSION_CONTEXT_BUDGET).failure
+						failure: LlmError.fromFailure({
+							message: reason,
+							code: FUSION_CONTEXT_BUDGET
+						}).failure
 					}
 				};
 				return;
@@ -5286,8 +5289,7 @@ var NativeContextGuard = class {
 		};
 	}
 };
-//#endregion
-//#region src/host/native-workflow.ts
+// src/host/native-workflow.ts
 const enforcedWorkflow = (binding) => binding.profile.workflowPolicy === "enforced-v1" || binding.profile.workflowPolicy === "enforced-v2" || binding.profile.workflowPolicy === "enforced-v3";
 /** v3 keeps every v2 mechanism and adds role separation (see native-role-sandbox). */
 const adaptiveWorkflow = (binding) => binding.profile.workflowPolicy === "enforced-v2" || binding.profile.workflowPolicy === "enforced-v3";
@@ -5416,8 +5418,7 @@ var NativeWorkflow = class {
 		return true;
 	}
 };
-//#endregion
-//#region src/host/native-model-control.ts
+// src/host/native-model-control.ts
 const LEAD_RECOVERABLE = [
 	"WORKFLOW_INCOMPLETE",
 	"NO_PROGRESS",
@@ -5836,8 +5837,7 @@ var NativeModelControl = class {
 		await Promise.allSettled(this.#pending);
 	}
 };
-//#endregion
-//#region src/host/compaction-routing.ts
+// src/host/compaction-routing.ts
 /** Publish exact session routes before another plugin estimates or chunks input. */
 function installCompactionRouting(ctx, input) {
 	let active = true;
@@ -5874,8 +5874,7 @@ function installCompactionRouting(ctx, input) {
 		fiber.dispose();
 	};
 }
-//#endregion
-//#region src/host/native-role-sandbox.ts
+// src/host/native-role-sandbox.ts
 const roleSeparated = (binding) => binding.profile.workflowPolicy === "enforced-v3";
 /**
 * Role separation enforced below the prompt: the Lead's session runs under the
@@ -6028,8 +6027,7 @@ var NativeRoleSandbox = class {
 		};
 	}
 };
-//#endregion
-//#region src/host/evidence-page.ts
+// src/host/evidence-page.ts
 /** Lossless text decoding; binary artifacts stay available as explicit base64. */
 function evidenceText(bytes) {
 	if (bytes.includes(0)) return void 0;
@@ -6066,8 +6064,7 @@ function evidencePage(bytes, offset = 0, limit = 24e3) {
 		nextOffset: truncated ? end : null
 	};
 }
-//#endregion
-//#region src/host/native-on-demand-context.ts
+// src/host/native-on-demand-context.ts
 /** No per-step snapshots. Emit a compact pointer only after loss of context. */
 var NativeOnDemandContext = class {
 	store;
@@ -6091,7 +6088,7 @@ var NativeOnDemandContext = class {
 		const previousRequest = events.findLast((event) => event.type === "request/header")?.seq;
 		const id = this.id(agent, binding), prior = this.store.readDocument(id);
 		const saved = prior?.value;
-		const key = cold && previousRequest !== void 0 ? `cold:${previousRequest}:compact:${compact ?? "none"}` : saved?.compaction === (compact ?? null) ? saved.key : compact !== void 0 ? `compact:${compact}` : void 0;
+		const key = cold && previousRequest !== void 0 ? `cold:${previousRequest}:compact:${compact ?? "none"}` : saved !== void 0 && saved.compaction === (compact ?? null) ? saved.key : compact !== void 0 ? `compact:${compact}` : void 0;
 		if (!key) return void 0;
 		const row = saved?.key === key ? saved : {
 			key,
@@ -6149,8 +6146,7 @@ var NativeOnDemandContext = class {
 		};
 	}
 };
-//#endregion
-//#region src/host/native-approvals.ts
+// src/host/native-approvals.ts
 /** Observe native decisions; never answer on the user's behalf or replay a grant. */
 var NativeApprovals = class {
 	ctx;
@@ -6376,8 +6372,7 @@ var NativeApprovals = class {
 		this.store.writeDocument(key, this.store.readDocument(key).revision, row);
 	}
 };
-//#endregion
-//#region src/host/native-effects.ts
+// src/host/native-effects.ts
 /** Public native dispatch journal; it never wraps a provider or invents a PID. */
 var NativeEffects = class {
 	ctx;
@@ -6447,7 +6442,7 @@ var NativeEffects = class {
 					if (snapshot.kind !== exec.name || snapshot.owner !== exec.agent.id) throw new Error("Native job ownership mismatch");
 					const maximum = this.callbacks.backgroundMaxMs ? this.callbacks.backgroundMaxMs(exec, owner.binding) : 6e4;
 					const requested = exec.arguments.timeoutMs;
-					const timeout = typeof requested === "number" && Number.isFinite(requested) && requested > 0 ? Math.min(requested, maximum ?? Infinity) : maximum;
+					const timeout = typeof requested === "number" && Number.isFinite(requested) && requested > 0 ? Math.min(requested, maximum ?? 1e400) : maximum;
 					if (timeout !== null && (!Number.isFinite(timeout) || timeout <= 0)) throw new Error("Background command deadline is unavailable");
 					row = {
 						...row,
@@ -6630,8 +6625,7 @@ var NativeEffects = class {
 		});
 	}
 };
-//#endregion
-//#region src/host/native-usage.ts
+// src/host/native-usage.ts
 /**
 * DSH counters are disjoint; missing provider fields retain unknown applicability.
 *
@@ -6769,8 +6763,7 @@ function observeNativeUsage(ctx, store, ownerOf, auxiliary) {
 		}
 	});
 }
-//#endregion
-//#region src/host/native-auxiliary.ts
+// src/host/native-auxiliary.ts
 /** Plugin-local identity: do not widen or misuse the Host's purpose enum. */
 var NativeAuxiliaryRequests = class {
 	#requests = /* @__PURE__ */ new WeakMap();
@@ -6781,8 +6774,7 @@ var NativeAuxiliaryRequests = class {
 		return this.#requests.get(request);
 	}
 };
-//#endregion
-//#region src/host/native-keepalive.ts
+// src/host/native-keepalive.ts
 /** R19 recovered schedule. */
 const KEEPALIVE_INTERVAL_MS = 285e3;
 /**
@@ -6830,7 +6822,7 @@ var NativeCacheKeepalive = class {
 	#active(row) {
 		if (this.#closed || this.#series.get(row.agent.id) !== row || row.controller.signal.aborted || this.ctx.agents.get(row.agent.id) !== row.agent) return false;
 		const current = this.callbacks.owner(row.agent);
-		return Boolean(current?.binding.selected && current.binding.taskId === row.owner.binding.taskId && current.binding.profile.digest === row.owner.binding.profile.digest && current.role === row.owner.role && this.#policy(current, row.input.provider, row.input.model).mode !== "off" && this.callbacks.allowed(row.agent, current));
+		return Boolean(current?.binding.selected && current.binding.taskId === row.owner.binding.taskId && current.binding.profile.digest === row.owner.binding.profile.digest && current.role === row.owner.role && this.callbacks.routeKey?.(current) === row.routeKey && this.#policy(current, row.input.provider, row.input.model).mode !== "off" && this.callbacks.allowed(row.agent, current));
 	}
 	#policy(owner, provider, model) {
 		if (this.callbacks.policy) return this.callbacks.policy(owner, provider, model);
@@ -7014,6 +7006,7 @@ var NativeCacheKeepalive = class {
 				agent,
 				owner,
 				input,
+				routeKey: manager.callbacks.routeKey?.(owner),
 				started: manager.clock.now(),
 				controller: new AbortController(),
 				revision: 0,
@@ -7080,15 +7073,15 @@ var NativeCacheKeepalive = class {
 		for (const dispose of this.#dispose.reverse()) dispose();
 	}
 };
-//#endregion
-//#region src/host/subagent-seam.ts
+// src/host/subagent-seam.ts
 /**
 * Runtime detection for the DSH subagent seam.
 * 0.2.1-rc.2 renamed continuable start/drain and removed `ctx.subagents.start`.
 * 0.2.0-rc.2 still has the old names. Callers branch on the function that is
 * actually present. They do not read a version string.
 */
-const supportedDshVersions = "0.2.0-rc.2 and 0.2.1-rc.2";
+const supportedDshVersions = "0.2.0-rc.2, 0.2.1-rc.*, and 0.2.2-rc.3";
+const hasSubagentTree = (api) => typeof api.rootOf === "function";
 function hasStartActivation(subagents) {
 	return typeof subagents.startActivation === "function";
 }
@@ -7099,13 +7092,13 @@ function requireSubagentMethod(subagents, primary, fallback) {
 	if (typeof api[fallback] === "function") return fallback;
 	throw new Error(`Fusion supports DeepSeek Harness ${supportedDshVersions}; this host has neither subagents.${primary} nor subagents.${fallback}`);
 }
-//#endregion
-//#region src/host/native-worker.ts
+// src/host/native-worker.ts
 /** Version-pinned public API adapter. It never calls an LLM adapter or runs a shell itself. */
 var NativeWorkerTransport = class {
 	ctx;
 	provider;
 	#flushed = /* @__PURE__ */ new WeakMap();
+	#activations = /* @__PURE__ */ new Map();
 	constructor(ctx, provider = "spawn") {
 		this.ctx = ctx;
 		this.provider = provider;
@@ -7136,12 +7129,17 @@ var NativeWorkerTransport = class {
 			label: request.label,
 			childId,
 			delivery: "parent",
-			request: {
+			...hasSubagentTree(this.ctx.subagents) ? {
 				parent,
 				prompt,
 				agentOptions,
 				maxDepth
-			},
+			} : { request: {
+				parent,
+				prompt,
+				agentOptions,
+				maxDepth
+			} },
 			signal
 		}) : await subagents.startContinuable({
 			provider: this.provider,
@@ -7157,6 +7155,14 @@ var NativeWorkerTransport = class {
 			},
 			signal
 		});
+		if (hasSubagentTree(this.ctx.subagents)) {
+			if (typeof accepted.dispose !== "function") throw new Error("Native activation cannot be disposed");
+			this.#activations.set(request.childId, {
+				parent,
+				activation: accepted
+			});
+			accepted.result?.catch(() => void 0);
+		}
 		if (accepted.childId !== request.childId) throw new Error("Native Worker identity changed during creation");
 		if (!accepted.messageId) throw new Error("Native Worker start did not accept an initial message");
 		return {
@@ -7217,7 +7223,7 @@ var NativeWorkerTransport = class {
 			}
 			await child.whenIdle();
 			if (interruptError) throw interruptError;
-			if (this.ctx.agents.get(child.id) !== child) throw new Error("Worker residency changed; quiescence requires reconciliation");
+			if (this.ctx.agents.get(child.id) !== child && this.ctx.agents.get(child.id) !== void 0) throw new Error("Worker residency changed; quiescence requires reconciliation");
 			await this.#flushSettled(child);
 			return child;
 		} finally {
@@ -7255,6 +7261,15 @@ var NativeWorkerTransport = class {
 	async release(parent, childId) {
 		const child = this.ctx.agents.get(SessionId$1(childId));
 		if (child && child.session.header.parentSession !== parent.id) throw new Error("Cannot release another Lead’s child");
+		if (hasSubagentTree(this.ctx.subagents)) {
+			const owned = this.#activations.get(childId);
+			if (owned && owned.parent !== parent) throw new Error("Cannot release another Lead’s activation");
+			if (!owned && child) throw new Error("Missing exact Worker activation; reconciliation required");
+			if (owned) await owned.activation.dispose();
+			if (this.ctx.agents.get(SessionId$1(childId))) throw new Error("Worker activation release did not prove absence");
+			this.#activations.delete(childId);
+			return;
+		}
 		const subagents = this.ctx.subagents;
 		const drain = requireSubagentMethod(subagents, "drainChildren", "drainContinuableChildren");
 		const ids = [SessionId$1(childId)];
@@ -7268,10 +7283,9 @@ var NativeWorkerTransport = class {
 		return child;
 	}
 };
-//#endregion
-//#region src/host/native-activity.ts
+// src/host/native-activity.ts
 const prefix = "activity-link:";
-const visibleTools = new Set([
+const visibleTools = /* @__PURE__ */ new Set([
 	"bash",
 	"pwsh",
 	"read",
@@ -7328,7 +7342,7 @@ async function readHistoricalFusionActivity(ctx, store, parentId, callId, after 
 		const start = child.events.find((event) => event.type === "user/message" && event.data.id === messageId);
 		if (!start) return cached;
 		const acceptedIds = new Set(tasks.flatMap((item) => store.events(item.taskId).flatMap((event) => event.type === "child/accepted" && event.payload.child === task.acceptedChild ? [event.payload.messageId] : [])));
-		const end = child.events.find((event) => event.seq > start.seq && event.type === "user/message" && acceptedIds.has(event.data.id))?.seq ?? Infinity;
+		const end = child.events.find((event) => event.seq > start.seq && event.type === "user/message" && acceptedIds.has(event.data.id))?.seq ?? 1e400;
 		const calls = /* @__PURE__ */ new Set();
 		const all = [];
 		for (const source of child.events) {
@@ -7494,12 +7508,37 @@ var NativeFusionActivity = class {
 		await this.flush();
 	}
 };
-//#endregion
-//#region src/host/native-exploration.ts
+// src/host/native-exploration.ts
 function formatChanged(paths) {
 	const shown = paths.slice(0, 12);
 	if (!shown.length) return "(snapshot id changed with no listed path delta)";
 	return `${shown.join(", ")}${paths.length > shown.length ? ` (+${paths.length - shown.length} more)` : ""}`;
+}
+const EMPTY_SCOPE_NOTE = "Host verified: the workspace listing contains no files.";
+/**
+* The model's sentence is required, and it is never proof. Callers must already
+* have seen an empty host listing. A search miss inside a workspace that still
+* has files does not match these phrases into an exception.
+*/
+function statesEmptyScope(summary) {
+	const text = summary.toLowerCase();
+	return text.includes("no files") || text.includes("zero files") || text.includes("0 files") || text.includes("scope is empty") || text.includes("empty scope") || text.includes("directory is empty") || text.includes("folder is empty") || text.includes("workspace is empty") || summary.includes("没有文件") || summary.includes("无文件") || summary.includes("空目录") || summary.includes("范围为空") || summary.includes("目录为空");
+}
+/**
+* The filtered manifest is not proof of emptiness. `readdir` omits `.` and `..`
+* and nothing else: a hidden file, a gitignored file, `.git`, or an excluded
+* directory such as `node_modules` is a real entry. A listing failure is not emptiness.
+*/
+function scopeDirectoryEmpty(root) {
+	try {
+		return readdirSync(root).length === 0;
+	} catch {
+		return false;
+	}
+}
+/** Both listings are the host's, and the directory itself has no entries. A failed live snapshot is not an empty scope. */
+function hostVerifiedEmptyScope(baseline, current) {
+	return current !== void 0 && baseline.root === current.root && baseline.entries.length === 0 && current.entries.length === 0 && scopeDirectoryEmpty(current.root);
 }
 /** Read cited ranges against the frozen baseline. Nothing is stored until every range is valid. */
 function prepareSources(baseline, sources) {
@@ -7546,9 +7585,17 @@ function storeSources(store, taskId, prepared) {
 * not against every other file in a non-git root. blocked and needs-decision reports
 * are always recorded, with drift or a failed whole-tree snapshot named, and are not acceptance.
 *
+* A completed report normally cites 1–12 ranges. Zero ranges are accepted only when
+* the frozen baseline and the listing taken at submit time both contain no manifest
+* entries, the directory itself has no entries on disk, and the summary states that
+* the scope is empty. A filtered manifest is not that check: gitignored files, hidden
+* files and excluded directories still count. The sentence is not proof. A non-empty
+* directory still requires 1–12 ranges, including when a search matched nothing.
+*
 * `current` is omitted when snapshotting the tree threw. The failure is stored on a
 * non-completed report. A completed report ignores that unrelated failure and still
-* stands or falls on the cited files alone.
+* stands or falls on the cited files alone. Zero ranges cannot use that path, because
+* there is no cited file to check and the live listing was not confirmed empty.
 */
 function captureExploration(store, order, baseline, current, submitted, sources, snapshotFailure) {
 	if (order.mode !== "explore" || baseline.id !== order.baseSnapshot || current !== void 0 && baseline.root !== current.root) throw new Error("Exploration capture requires the frozen explore baseline");
@@ -7576,7 +7623,21 @@ function captureExploration(store, order, baseline, current, submitted, sources,
 			sources: storeSources(store, order.taskId, prepared)
 		};
 	}
-	if (!sources.length || sources.length > 12) throw new Error("A completed exploration requires 1–12 source ranges");
+	if (sources.length > 12) throw new Error("A completed exploration requires 1–12 source ranges");
+	if (!sources.length) {
+		if (!hostVerifiedEmptyScope(baseline, current)) throw new Error("A completed exploration requires 1–12 source ranges");
+		if (!statesEmptyScope(submitted.summary)) throw new Error("The host listing contains no files. A completed report may omit source ranges only when the summary states that the scope is empty.");
+		const summary = submitted.summary.includes(EMPTY_SCOPE_NOTE) ? submitted.summary : `${submitted.summary}\n\n${EMPTY_SCOPE_NOTE}`;
+		return {
+			schemaVersion: 1,
+			workOrderId: order.id,
+			revision: order.revision,
+			...submitted,
+			summary,
+			snapshot: baseline.id,
+			sources: []
+		};
+	}
 	if (drifted && current) {
 		const cited = new Set(sources.map((source) => source.path));
 		const citedChanged = changed.filter((path) => cited.has(path));
@@ -7606,8 +7667,7 @@ function citedEvidenceChanged(root, baseline, report) {
 		}
 	}
 }
-//#endregion
-//#region src/host/workspace-guard.ts
+// src/host/workspace-guard.ts
 /**
 * Workspace write mutual exclusion for agents Fusion owns.
 * Ordinary sessions are not governed: a foreign lease does not make them read-only.
@@ -7619,8 +7679,7 @@ function workspaceWriterDenial(input) {
 	if (!input.cwd || !input.leaseHolder || input.leaseHolder === input.agentId) return void 0;
 	return `Workspace writer is ${input.leaseHolder}; this Agent is read-only`;
 }
-//#endregion
-//#region src/host/model-output.ts
+// src/host/model-output.ts
 /** Public model metadata only; resolving limits does not start a model turn. */
 async function resolveModelOutputLimits(ctx, provider, model) {
 	const info = await ctx.llm.resolveModelInfo(provider, model);
@@ -7632,8 +7691,7 @@ async function resolveModelOutputLimits(ctx, provider, model) {
 		defaultMaxTokens: info.defaultMaxTokens
 	};
 }
-//#endregion
-//#region src/host/change-evidence.ts
+// src/host/change-evidence.ts
 /** Read only the exact leaf described by the snapshot, never its symlink target. */
 function readEntry(snapshot, entry) {
 	if (realpathSync.native(snapshot.root) !== snapshot.root) throw new Error("Evidence workspace root changed");
@@ -7644,7 +7702,7 @@ function readEntry(snapshot, entry) {
 		if (!before.isSymbolicLink()) throw new Error("Evidence file kind changed");
 		bytes = readlinkSync(path, { encoding: "buffer" });
 	} else {
-		if (!before.isFile() || before.size > 16 * 1024 * 1024) throw new Error("Evidence file is not a bounded regular source file");
+		if (!before.isFile() || before.size > 16777216) throw new Error("Evidence file is not a bounded regular source file");
 		const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
 		try {
 			const opened = fstatSync(fd);
@@ -7769,8 +7827,7 @@ function saveChangeManifest(store, taskId, base, candidate, captured) {
 		candidate
 	})), "application/vnd.dsh-fusion.change-manifest+json");
 }
-//#endregion
-//#region src/host/native-evidence.ts
+// src/host/native-evidence.ts
 /** Coverage uses logical receipt IDs; ordinary evidence uses content digests. */
 function readNativeEvidence(store, taskId, id) {
 	if (!id.startsWith("receipt:")) return store.readArtifact(taskId, id);
@@ -7787,8 +7844,7 @@ function readNativeEvidence(store, taskId, id) {
 		receipt
 	}));
 }
-//#endregion
-//#region src/host/coordinator.ts
+// src/host/coordinator.ts
 const textOutput = {
 	schema: { type: "string" },
 	render: (_args, text) => [{
@@ -7805,7 +7861,7 @@ const optionalStringList = {
 	type: "array",
 	items: { type: "string" }
 };
-const READ_TOOLS = new Set([
+const READ_TOOLS = /* @__PURE__ */ new Set([
 	"fusion_read_state",
 	"glob",
 	"grep",
@@ -7814,7 +7870,7 @@ const READ_TOOLS = new Set([
 	"job_output"
 ]);
 const isRead = (exec) => READ_TOOLS.has(exec.name) || exec.name === "str_replace_editor" && exec.arguments.command === "view";
-const FUSION_TOOLS = new Set([
+const FUSION_TOOLS = /* @__PURE__ */ new Set([
 	"fusion_read_state",
 	"fusion_delegate_text",
 	"fusion_explore",
@@ -7827,7 +7883,7 @@ const FUSION_TOOLS = new Set([
 	"fusion_finish_direct",
 	"fusion_read_evidence"
 ]);
-const WORKER_FUSION_TOOLS = new Set([
+const WORKER_FUSION_TOOLS = /* @__PURE__ */ new Set([
 	"fusion_submit_result",
 	"fusion_read_state",
 	"fusion_read_evidence"
@@ -7886,10 +7942,87 @@ const DEFAULT_POLICY = {
 };
 /** Whitespace-insensitive, otherwise exact: a requirement must be the user's own words. */
 const normalizeQuote = (text) => text.replace(/\s+/g, " ").trim();
+/**
+* A follow-up that adds no new instruction. Exact quotes from the task it continues
+* stay valid; a message that adds its own words starts a fresh quote boundary.
+*/
+const BARE_CONTINUATION = /^(?:please\s+)?(?:continue|go on|carry on|keep going|proceed|resume|cont|继续|接着做|接着来|接着|往下做|往下|请继续)[.!。！…]*$/i;
+function isBareContinuation(text) {
+	return BARE_CONTINUATION.test(normalizeQuote(text));
+}
+/**
+* enforced-v3: a bare no-tool turn must not close a concrete workspace request,
+* or a reply that only promises to inspect, delegate, or implement. Asking what
+* a word means ("what is a patch", "what does implement mean", "是什么", "如何实现")
+* is not that request, and neither is an explanation that forbids edits.
+* A definition clause does not waive a later command in the same sentence.
+* A conversational answer such as "Hello." does not match either pattern.
+*/
+const IMPLEMENTATION_REQUEST = /(?:\b(?:fix|implement|refactor|patch|repair|correct)\b|\brun\b[\s\S]{0,48}\btests?\b|修复|实现|改正|重构|跑测试|运行测试|不要只(?:做)?计划|do not stop after planning)/i;
+const PLANNING_REPLY = /(?:\b(?:i will|i'll|i'm going to|i am going to|let me)\b[\s\S]{0,180}\b(?:inspect|delegate|implement|fix|explore|correct|continue|look|check|read|hand(?:\s|-)?off)\b|我将|我会|接下来我会|让我(?:先)?|我先(?:去)?(?:查看|看看|看一下|检查|阅读)(?!了)|准备(?:去)?(?:检查|查看|交给|委托)|交给\s*Sidekick)/i;
+const DEFINITIONAL_QUESTION = /(?:\bwhat(?:'s|\s+is|\s+are)\b|\bwhat\s+does\b[\s\S]{0,240}\bmeans?\b|\bexplain\b|\bhow\s+do\s+i\b|\bhow\s+does\b|\bwhy\s+(?:do|does|is|are|should)\b|是什么|什么意思|什么是|怎么理解|如何理解|是啥)/i;
+const NON_MUTATION = /(?:\bwithout\s+changing\s+any\s+files\b|\bexplain\s+only\b|\bdo\s+not\s+edit\s+any\s+files\b|\bwithout\s+editing\s+files\b|\bwithout\s+executing\s+anything\b|\banswer\s+conceptually\b|只讲原理|不要修改文件|只解释概念|不改文件|不要实际执行命令)/i;
+const EN_COMMAND = String.raw`(?:fix|implement|patch|refactor|repair|correct|change|edit|update|apply|write)\b`;
+const ZH_COMMAND = String.raw`(?:修复|实现|改正|重构)`;
+const ZH_COMMAND_LINK = String.raw`(?:然后|并且|并|以及|再|接着)`;
+/** An imperative to change the workspace. A mention inside "what does X mean" or "如何运行测试" is not one. */
+const COMMAND_ACTION = new RegExp([
+	String.raw`(?:^|[.!?。！？]\s*)(?:please\s+)?${EN_COMMAND}`,
+	String.raw`(?:^|[.!?。！？]\s*)(?:请\s*)?${ZH_COMMAND}`,
+	String.raw`\b(?:and then|then)\s+(?:please\s+)?${EN_COMMAND}`,
+	String.raw`\band\s+(?:please\s+)?${EN_COMMAND}`,
+	String.raw`,?\s*(?:and\s+)?then\s+(?:please\s+)?${EN_COMMAND}`,
+	String.raw`(?:然后|并且)(?:请\s*)?${ZH_COMMAND}`,
+	String.raw`(?:[，,]\s*)?(?:并|以及|再|接着)(?:请\s*)?${ZH_COMMAND}`,
+	String.raw`(?:^|[.!?。！？]\s*|\b(?:and|then)\s+)(?:please\s+)?run\b[\s\S]{0,48}\btests?\b`,
+	String.raw`(?:^|[.!?。！？]\s*|(?:[，,]\s*)?${ZH_COMMAND_LINK})(?:请\s*)?(?:跑测试|运行测试)`,
+	String.raw`do not stop after planning`,
+	String.raw`不要只(?:做)?计划`
+].join("|"), "i");
+/**
+* Drop a definitional or explanation-only clause. The subject of a prefix question
+* ("什么是运行测试") follows the marker; the subject of a suffix question ("实现是什么")
+* precedes it. A trailing imperative ("and fix", "，并实现") stays in place.
+*/
+function stripDefinitionSubject(sentence) {
+	return sentence.replace(/\bwhat\s+does\b[\s\S]{0,240}?\bmeans?\b/gi, " ").replace(/\bwhat(?:'s|\s+is|\s+are)\b[\s\S]{0,240}?[?？]/gi, " ").replace(/\bexplain\s+what\b[^,.!?。！？]{0,240}?\b(?:is|means|does)\b/gi, " ").replace(/请?解释(?:一下)?(?:什么是[^，,。！？?!]+|[^，,。！？?!]*?(?:是什么|什么意思))/g, " ").replace(/(?:什么是|怎么理解|如何理解)[^，,。！？?!]*/g, " ").replace(/[^，,。！？?!]*?(?:是什么|什么意思|是啥)/g, " ").replace(/\b(?:please\s+)?explain\s+how\s+to\b(?:(?!\b(?:and|then)\s+)(?![，,]\s*(?:并|以及|再|接着|然后|并且))[\s\S]){0,240}/gi, " ").replace(/\bhow\s+do\s+i\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, " ").replace(/\bhow\s+does\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, " ").replace(/\bwhy\s+(?:do|does|is|are|should)\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, " ").replace(/请?解释(?:一下)?如何(?:(?![，,]\s*(?:并|以及|再|接着|然后|并且))[^。！？?!])*/g, " ").replace(/(?:^|[。！？?!]\s*)如何(?:(?![，,]\s*(?:并|以及|再|接着|然后|并且))[^，,。！？?!])*/g, " ").replace(NON_MUTATION, " ");
+}
+/** Sentence breaks. A dot followed by a letter, as in calc.py, stays inside the sentence. */
+function sentencesOf(text) {
+	const parts = [];
+	let start = 0;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i];
+		const cjk = char === "。" || char === "！" || char === "？";
+		const latinEnd = (char === "." || char === "!" || char === "?") && (i === text.length - 1 || /\s/.test(text[i + 1] ?? ""));
+		if (!cjk && !latinEnd) continue;
+		parts.push(text.slice(start, i + 1));
+		start = i + 1;
+	}
+	if (start < text.length) parts.push(text.slice(start));
+	return parts.map((sentence) => sentence.trim()).filter(Boolean);
+}
+/**
+* True when the user asked for a workspace change. A definitional question that
+* only mentions words like patch or implement is not a change request.
+*/
+function concreteImplementationRequest(text) {
+	const normalized = normalizeQuote(text);
+	if (!IMPLEMENTATION_REQUEST.test(normalized)) return false;
+	for (const sentence of sentencesOf(normalized)) {
+		const stripped = stripDefinitionSubject(sentence);
+		if (COMMAND_ACTION.test(stripped)) return true;
+		if (!DEFINITIONAL_QUESTION.test(sentence) && IMPLEMENTATION_REQUEST.test(stripped)) return true;
+	}
+	return false;
+}
+function directTurnLeavesWorkOpen(userTexts, assistantText) {
+	return PLANNING_REPLY.test(assistantText) || userTexts.some(concreteImplementationRequest);
+}
 /** Literal code spans (`like this`) a requirement asks for; a candidate that omits them gets flagged. */
 const literalSpans = (text) => [...new Set([...text.matchAll(/`([^`\n]{2,120})`/g)].map((match) => match[1]))];
 /** The enforced-v3 Lead's fixed catalog (order is part of the cached prompt prefix). */
-const SEPARATED_LEAD_TOOLS = [...new Set([
+const SEPARATED_LEAD_TOOLS = [.../* @__PURE__ */ new Set([
 	...READ_TOOLS,
 	nativeShellTool,
 	...[...FUSION_TOOLS].filter((name) => ![
@@ -7990,7 +8123,7 @@ var FusionCoordinator = class {
 				this.#createTask(agent, nextTask, {
 					profile: binding.profile,
 					prompts: binding.prompts
-				});
+				}, this.#carriedContinuationSeq(agent, binding.taskId));
 				return this.bindings.rollover(agent.id, binding.taskId, nextTask);
 			},
 			taskContext: (agent, binding, role) => binding.profile.interactionMode === "model-like" ? this.onDemand.message(agent, binding, role) : this.taskContext.message(agent, binding, role),
@@ -8102,10 +8235,13 @@ var FusionCoordinator = class {
 		}));
 		this.cachePolicy = new CachePolicy(store);
 		this.keepalive = new NativeCacheKeepalive(ctx, store, this.#auxiliary, {
+			routeKey: (owner) => digestOf({
+				route: this.modelControl?.route(owner.binding, owner.role) ?? owner.binding.profile[owner.role],
+				epoch: readModelControl(store, owner.binding)?.epoch ?? 0
+			}),
 			owner: (agent) => this.owner(agent),
 			allowed: (agent, owner) => {
 				const state = this.state(owner.binding.taskId);
-				if (digestOf(this.modelControl?.route(owner.binding, owner.role) ?? owner.binding.profile[owner.role]) !== digestOf(owner.binding.profile[owner.role])) return false;
 				try {
 					if (state.control.mode !== "running" || this.#requestBlocked(agent, owner.binding, owner.role)) return false;
 				} catch (error) {
@@ -8235,6 +8371,8 @@ var FusionCoordinator = class {
 			if (state.currentWorkOrder || state.control.mode !== "running" || this.modelControl.blocked(binding, "lead")) return;
 			if (state.lease && binding.profile.interactionMode !== "model-like") return;
 			if (this.effects.pending(binding.taskId).length) return;
+			const agent = this.ctx.agents.get(SessionId$1(session.id));
+			if (agent && roleSeparated(binding) && this.#directTurnLeavesWorkOpen(agent, binding.taskId)) return;
 			try {
 				this.#release(binding.taskId);
 				this.append(binding.taskId, "intent/chosen", { intent: "DIRECT" });
@@ -8326,7 +8464,7 @@ var FusionCoordinator = class {
 		this.modelControl.reset(binding);
 		this.scopes.install(agent, binding, "lead");
 	}
-	#createTask(agent, taskId, resolved) {
+	#createTask(agent, taskId, resolved, firstSeq) {
 		this.store.create({
 			schemaVersion: 1,
 			id: randomUUID(),
@@ -8349,7 +8487,32 @@ var FusionCoordinator = class {
 			profileId: resolved.profile.id,
 			version: resolved.profile.version
 		});
-		this.taskContext.begin(agent, taskId);
+		this.taskContext.begin(agent, taskId, firstSeq);
+	}
+	/**
+	* A bare "Continue" starts a new task after the previous one completed, but the
+	* user's original words are still the requirement source. Anything else keeps
+	* the new task's own boundary.
+	*/
+	#carriedContinuationSeq(agent, previousTaskId) {
+		const pending = agent.inbox.nextTurn[0];
+		if (!pending || pending.source && pending.source.kind !== "user") return void 0;
+		if (!isBareContinuation(pending.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n"))) return void 0;
+		const origin = this.store.readDocument(`task-origin:${previousTaskId}`)?.value;
+		if (typeof origin?.firstSeq === "number" && Number.isSafeInteger(origin.firstSeq) && origin.firstSeq >= 0 && origin.firstSeq <= agent.session.seq) return origin.firstSeq;
+		return 0;
+	}
+	/** User text since this task's origin, plus the Lead's latest reply. */
+	#directTurnLeavesWorkOpen(agent, taskId) {
+		const origin = this.store.readDocument(`task-origin:${taskId}`)?.value;
+		const firstSeq = typeof origin?.firstSeq === "number" ? origin.firstSeq : 0;
+		const userTexts = agent.session.snapshotEvents().flatMap((event) => {
+			if (event.seq < firstSeq || event.type !== "user/message") return [];
+			if (event.data.source && event.data.source.kind !== "user") return [];
+			return event.data.content.flatMap((block) => block.type === "text" ? [block.text] : []);
+		});
+		const reply = agent.session.snapshotEvents().findLast((event) => event.type === "assistant/message");
+		return directTurnLeavesWorkOpen(userTexts, reply && reply.type === "assistant/message" ? reply.data.message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n") : "");
 	}
 	async clear(agent) {
 		const binding = this.bindings.read(agent.id)?.binding;
@@ -8476,7 +8639,7 @@ var FusionCoordinator = class {
 		const end = child.session.snapshotEvents().findLast((event) => event.type === "turn/end");
 		if (!end || end.type !== "turn/end" || end.data.reason.kind !== "error") return;
 		const runtime = this.#runtime(binding.taskId), cleared = runtime.workerFailureClearedThrough;
-		if (runtime.workerFailure?.childId === child.id && runtime.workerFailure.eventSeq === end.seq || cleared?.childId === child.id && cleared.eventSeq >= end.seq) return;
+		if (runtime.workerFailure?.childId === child.id && runtime.workerFailure?.eventSeq === end.seq || cleared?.childId === child.id && (cleared?.eventSeq ?? -1) >= end.seq) return;
 		const error = end.data.reason.error;
 		const code = error.code && /^[A-Z0-9_-]{1,64}$/i.test(error.code) ? error.code : void 0;
 		const quota = [
@@ -8547,7 +8710,7 @@ var FusionCoordinator = class {
 			if (problem) return problem;
 		}
 		if (role === "worker" && state.currentWorkOrder?.mode === "text" && !WORKER_FUSION_TOOLS.has(exec.name)) return "Text delegation has no external tools; prepare the result from the supplied material";
-		if (role === "worker" && state.currentWorkOrder?.mode === "explore" && !isRead(exec) && exec.name !== "fusion_submit_result") return "Exploration is read-only: use file search/read tools and fusion_submit_result with source ranges; no shell, edits or run_code";
+		if (role === "worker" && state.currentWorkOrder?.mode === "explore" && !isRead(exec) && exec.name !== "fusion_submit_result") return "Exploration is read-only: use file search/read tools and fusion_submit_result with 1–12 source ranges (omit them only when the directory has no entries on disk and you state that the scope is empty); no shell, edits or run_code";
 		if (role === "worker" && !this.options.workerTools.includes(exec.name) && !WORKER_FUSION_TOOLS.has(exec.name)) return `${exec.name} is outside the Sidekick's configured tools (${this.options.workerTools.join(", ")})`;
 		if (binding.profile.interactionMode === "model-like" && !isRead(exec)) {
 			const restore = this.onDemand.blocked(exec.agent, binding);
@@ -8559,7 +8722,7 @@ var FusionCoordinator = class {
 		}
 		if (enforcedWorkflow(binding) && role === "lead" && !isRead(exec) && !FUSION_TOOLS.has(exec.name) && (!adaptiveWorkflow(binding) || state.currentWorkOrder)) {
 			const nested = this.#nestedChecks.get(exec.callId);
-			const check = isShellTool(exec.name) && nested?.agent === exec.agent && nested.parent === exec.parent;
+			const check = isShellTool(exec.name) && nested?.agent === exec.agent && (typeof this.ctx.tools.resolve === "function" || nested.parent === exec.parent);
 			const takeover = state.currentWorkOrder && this.#runtime(binding.taskId).takeover;
 			if (!check && !takeover) return this.workflow.denyEffect(binding);
 		}
@@ -8617,7 +8780,7 @@ var FusionCoordinator = class {
 				}
 			}
 			const nested = this.#nestedChecks.get(exec.callId);
-			if (role === "lead" && state.intent === "DELEGATE" && !this.#runtime(binding.taskId).takeover && (!nested || nested.agent !== exec.agent || nested.parent !== exec.parent)) return "Lead is reviewing; use the native acceptance checks or request takeover";
+			if (role === "lead" && state.intent === "DELEGATE" && !this.#runtime(binding.taskId).takeover && (!nested || nested.agent !== exec.agent || typeof this.ctx.tools.resolve !== "function" && nested.parent !== exec.parent)) return "Lead is reviewing; use the native acceptance checks or request takeover";
 		}
 	}
 	/**
@@ -8672,7 +8835,7 @@ var FusionCoordinator = class {
 		if (exec.name === "fusion_submit_result" || exec.name === "fusion_finish_direct") return "FUSION_LEAD_READ_ONLY: in this Fusion mode the Lead never writes. Send corrections to the same Sidekick with fusion_rework.";
 		if (isRead(exec) || FUSION_TOOLS.has(exec.name)) return false;
 		const nested = this.#nestedChecks.get(exec.callId);
-		if (isShellTool(exec.name) && nested && nested.agent === exec.agent && nested.parent === exec.parent) return false;
+		if (isShellTool(exec.name) && nested && nested.agent === exec.agent && (typeof this.ctx.tools.resolve === "function" || nested.parent === exec.parent)) return false;
 		if (isShellTool(exec.name) && exec.arguments.run_in_background === true) {
 			this.workflow.denyEffect(binding);
 			return "FUSION_LEAD_READ_ONLY: the Lead runs only short foreground inspection commands. Test runs and long commands belong to the Sidekick: delegate them.";
@@ -9039,7 +9202,7 @@ var FusionCoordinator = class {
 		const hard = requirements.length ? `Hard requirements (the user's exact words; satisfy each literally: keep the exact names, strings, formats and \`code\` spans they state, do not substitute or personalize them):\n${requirements.map((text, i) => `${i + 1}. ${text}`).join("\n")}\n\n` : "";
 		const known = checks.filter((check) => check.plan.allowedFailures?.length).map((check) => `${check.definition.id}: ${JSON.stringify(check.plan.allowedFailures)}`);
 		const knownText = known.length ? `\n\nPre-existing failures the Host observed on the untouched workspace before you started (not part of this task; these checks pass while only these fail, so do not change unrelated code to fix them):\n${known.join("\n")}` : "";
-		const brief = `${request}${hard}Current stage brief (Lead-authored; later feedback may advance or replace this stage without changing the frozen work order):\n${args.brief}\n\nFrozen work order (goal and constraints apply throughout this work order, across all implementation stages):\n${JSON.stringify(shownOrder)}\n\n${mode === "explore" ? "Read-only exploration: return findings and source ranges through fusion_submit_result. Do not implement, run commands, or claim task completion." : `Acceptance commands:\n${JSON.stringify(args.checks)}${knownText}`}`;
+		const brief = `${request}${hard}Current stage brief (Lead-authored; later feedback may advance or replace this stage without changing the frozen work order):\n${args.brief}\n\nFrozen work order (goal and constraints apply throughout this work order, across all implementation stages):\n${JSON.stringify(shownOrder)}\n\n${mode === "explore" ? "Read-only exploration: return findings through fusion_submit_result. A completed report cites 1–12 file ranges. Omit ranges only when the directory has no entries on disk and the summary states that the scope is empty; the host accepts that only when its own listing is also empty. Hidden, gitignored and excluded entries still count. A search that matches nothing in a workspace that still has files does not qualify. Do not implement, run commands, or claim task completion." : `Acceptance commands:\n${JSON.stringify(args.checks)}${knownText}`}`;
 		const payload = this.store.putArtifact(binding.taskId, Buffer.from(brief), "text/plain");
 		const prepared = this.state(binding.taskId);
 		this.store.transact(binding.taskId, prepared.seq, (persisted) => ({
@@ -9412,6 +9575,7 @@ var FusionCoordinator = class {
 			if (report.status === "completed") {
 				const cited = citedEvidenceChanged(runtime.root, runtime.base, report);
 				if (cited) throw new Error(`Cited exploration evidence changed: ${cited}. Frozen baseline ${order.baseSnapshot}. Submit blocked or needs-decision to record the drift.`);
+				if (!report.sources.length && !scopeDirectoryEmpty(runtime.root)) throw new Error("A completed exploration requires 1–12 source ranges");
 			}
 			this.store.transact(binding.taskId, state.seq, (persisted) => ({
 				events: [{
@@ -9846,11 +10010,11 @@ var FusionCoordinator = class {
 		}))];
 		dispose.push(scope.tools.register(defineTool({
 			name: "fusion_submit_result",
-			description: role === "lead" ? "Lead use only after fusion_takeover: submit your own correction so the frozen checks run again. To judge a Sidekick report, use fusion_review_result instead." : "Submit the current work-order report and conclude this Worker turn. Read-only exploration requires source ranges; implementation retains frozen checks and Lead review.",
+			description: role === "lead" ? "Lead use only after fusion_takeover: submit your own correction so the frozen checks run again. To judge a Sidekick report, use fusion_review_result instead." : "Submit the current work-order report and conclude this Worker turn. Read-only exploration requires 1–12 source ranges, unless the directory has no entries on disk and the summary states that the scope is empty. Hidden, gitignored and excluded entries still count, and the host checks again when the Lead collects or finishes the report. Implementation retains frozen checks and Lead review.",
 			parameters: {
 				summary: {
 					type: "string",
-					description: "Changes and findings; put nonblocking observations here.",
+					description: "Changes and findings; put nonblocking observations here. For an empty scope, state that the scope is empty (for example \"the scope is empty\" or \"没有文件\").",
 					required: true
 				},
 				status: {
@@ -9868,7 +10032,7 @@ var FusionCoordinator = class {
 				},
 				sources: {
 					type: "array",
-					description: "Required for completed exploration: 1–12 workspace-relative file ranges, each at most 80 lines. Host captures exact text; no invented snippets.",
+					description: "Required for a completed exploration when the directory contains any entry: 1–12 workspace-relative file ranges, each at most 80 lines. Host captures exact text; no invented snippets. Omit sources only when the directory itself has no entries and the summary states that the scope is empty. Hidden, gitignored and excluded entries still count. A search miss inside a non-empty workspace does not qualify.",
 					items: {
 						type: "object",
 						additionalProperties: false,
@@ -10016,6 +10180,7 @@ var FusionCoordinator = class {
 					if (state.lease) throw new Error("Read-only exploration still holds a write lease");
 					const cited = citedEvidenceChanged(runtime.root, runtime.base, state.exploration);
 					if (cited) throw new Error(`Cited exploration evidence changed: ${cited}. Frozen baseline ${state.exploration.snapshot}.`);
+					if (!state.exploration.sources.length && !scopeDirectoryEmpty(runtime.root)) throw new Error("A completed exploration requires 1–12 source ranges");
 					try {
 						snapshot = snapshotWorkspace(runtime.root).id;
 					} catch {
@@ -10275,10 +10440,9 @@ var FusionCoordinator = class {
 		for (const dispose of this.#dispose.reverse()) dispose();
 	}
 };
-//#endregion
-//#region src/host/native-budget.ts
+// src/host/native-budget.ts
 function nativeAuthorization(raw) {
-	const keys = new Set([
+	const keys = /* @__PURE__ */ new Set([
 		"schemaVersion",
 		"kind",
 		"approved",
@@ -10295,7 +10459,7 @@ function nativeAuthorization(raw) {
 	if (!value || value.schemaVersion !== 1 || value.kind !== "native-fusion-requests" || value.approved !== true || !value.authorizationId?.trim() || !value.approvedBy?.trim() || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now() || !Number.isSafeInteger(value.maxNativeRequests) || value.maxNativeRequests <= 0 || !Number.isSafeInteger(value.maxReservedOutputTokens) || value.maxReservedOutputTokens <= 0 || value.costPolicy !== "unknown-cost-acknowledged" || !Array.isArray(value.routes) || !value.routes.length || value.routes.some((route) => !route.provider?.trim() || !route.model?.trim())) throw new Error("An unexpired, explicit native request spending authorization is required");
 	return structuredClone(value);
 }
-const UNLIMITED_HOURS = 24 * 365 * 100;
+const UNLIMITED_HOURS = 876e3;
 /** Called only by explicit human settings actions (save or limits), never by a model tool. */
 function authorizeConfiguredPair(store, routes, limits) {
 	const input = limits;
@@ -10374,8 +10538,7 @@ var NativeRequestBudget = class {
 		});
 	}
 };
-//#endregion
-//#region src/host/http.ts
+// src/host/http.ts
 function trustedRequest(req) {
 	if (![
 		"127.0.0.1",
@@ -10409,15 +10572,14 @@ async function readJson(req) {
 	let size = 0;
 	for await (const chunk of req) {
 		size += chunk.length;
-		if (size > 256 * 1024) throw new Error("Request body exceeds 256 KiB");
+		if (size > 262144) throw new Error("Request body exceeds 256 KiB");
 		chunks.push(Buffer.from(chunk));
 	}
 	const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON object required");
 	return value;
 }
-//#endregion
-//#region src/host/status.ts
+// src/host/status.ts
 /** English copies of the stage and detail texts; the client shows them when DSH runs in English. */
 const EN = {
 	"正在停止": "Stopping",
@@ -10563,8 +10725,7 @@ function readStatus(store, sessionId, index) {
 		}
 	};
 }
-//#endregion
-//#region src/usage/normalize.ts
+// src/usage/normalize.ts
 function finite(value) {
 	if (value === null || value === void 0) return null;
 	if (!Number.isFinite(value) || value < 0) throw new TypeError(`usage must be a finite nonnegative number, got ${value}`);
@@ -10787,8 +10948,7 @@ function apiEquivalentUsd(usage, card) {
 	const priced = priceUsage(usage, card);
 	return priced.status === "complete" ? priced.totalUsd : null;
 }
-//#endregion
-//#region src/usage/pricing.ts
+// src/usage/pricing.ts
 function requireThat(value, code) {
 	if (!value) throw new FusionError(USAGE_LEDGER_REQUIRED, code);
 }
@@ -10848,8 +11008,7 @@ function quoteLedger(ledger, rates, priceCardDigest = digestOf(rates)) {
 		missing
 	};
 }
-//#endregion
-//#region src/usage/budget.ts
+// src/usage/budget.ts
 var BudgetLedger = class {
 	authorization;
 	#spent = 0;
@@ -10904,8 +11063,7 @@ function loadSpendingAuthorization(raw) {
 		approvedBy: value.approvedBy ?? null
 	};
 }
-//#endregion
-//#region src/approval/logical.ts
+// src/approval/logical.ts
 function answerApproval(approval, state, decisionBy = "human") {
 	if (approval.state !== "pending") throw new FusionError(APPROVAL_SCOPE, `approval ${approval.id} is ${approval.state}`);
 	return {
@@ -10929,8 +11087,7 @@ function neverMeansDeny(policy) {
 function pendingDoesNotExpire(_approval, _nowMs) {
 	return true;
 }
-//#endregion
-//#region src/recovery/reconcile.ts
+// src/recovery/reconcile.ts
 function reconcile(scan) {
 	if (scan.reportAlreadyRecorded && !scan.parentDelivered) return { action: "return-stored-result" };
 	if (scan.reportAlreadyRecorded && scan.parentDelivered) return { action: "idle" };
@@ -10952,8 +11109,7 @@ function reconcile(scan) {
 	};
 	return { action: "idle" };
 }
-//#endregion
-//#region src/benchmark/naive.ts
+// src/benchmark/naive.ts
 /** A declared benchmark treatment, never installed in product sessions. */
 const naivePrompts = {
 	lead: "Complete the user task. You may work directly or use naive_delegate for a bounded implementation or test task. Every delegation starts a fresh independent Worker, which sees only your brief and the shared workspace. Include the relevant requirements and constraints in that brief. Inspect the returned result, correct defects or delegate again as needed, and run relevant tests before finishing. Delegation and direct commands run sequentially under the same total allowance.",
@@ -11089,12 +11245,17 @@ var NaiveCoordinator = class {
 					provider: "spawn",
 					label: `Naive Worker ${row.ordinal}`,
 					delivery: "caller",
-					request: {
+					...hasSubagentTree(this.ctx.subagents) ? {
 						parent: this.parent,
 						prompt,
 						agentOptions,
 						maxDepth
-					},
+					} : { request: {
+						parent: this.parent,
+						prompt,
+						agentOptions,
+						maxDepth
+					} },
 					signal: runSignal
 				});
 				started = {
@@ -11170,8 +11331,7 @@ var NaiveCoordinator = class {
 		if (this.#writer || this.#delegating || this.delegations.some((row) => row.childSessionId && !row.disposed)) throw new Error("Naive child/tool quiescence unproven");
 	}
 };
-//#endregion
-//#region src/benchmark/output-limits.ts
+// src/benchmark/output-limits.ts
 /** Run before preregistration, then compare the exact snapshot before spending.
 * Every treatment uses the same role's automatic product allowance; the profile
 * reservation is a fallback, not a universal per-request cap.
@@ -11197,8 +11357,7 @@ async function resolveBenchmarkOutputLimits(ctx, profile) {
 		roles
 	};
 }
-//#endregion
-//#region src/benchmark/native-run.ts
+// src/benchmark/native-run.ts
 const selfReviewPrompt = `Perform a second self-review of your work against the original user request. Inspect the current implementation, look for defects or missed requirements, fix any you find, and run the relevant tests. Preserve the existing acceptance tests. Use the remaining allowance for this same attempt; no additional budget has been granted. Finish with the result of this review and any unresolved limitations.`;
 /**
 * Run one fresh attempt through the same native AgentLoop and FusionCoordinator
@@ -11272,10 +11431,8 @@ async function runNativeBenchmark(ctx, options) {
 				maxTokens: outputLimits.roles[role].maxTokens
 			}
 		})).agent;
-		installModelSelection(parent.ctx, {
-			current: nativeRoute,
-			assembled: void 0
-		});
+		installModelSelection(parent.ctx);
+		parent.model.select(nativeRoute);
 	} catch (error) {
 		store.close();
 		throw error;
@@ -11463,8 +11620,7 @@ async function runNativeBenchmark(ctx, options) {
 		store.close();
 	}
 }
-//#endregion
-//#region src/dsh-model-fusion.ts
+// src/dsh-model-fusion.ts
 const name = "dsh-model-fusion";
 const inject = [
 	"agents",
@@ -11538,8 +11694,9 @@ async function apply(ctx, config = {}) {
 		if (runtime) return Promise.resolve(runtime);
 		if (creating) return creating;
 		creating = (async () => {
+			const profile = frozen ?? await configuredProfile();
 			runtime = new FusionCoordinator(ctx, store, {
-				profile: frozen ?? await configuredProfile(),
+				profile,
 				workerTools: config.workerTools ?? defaultWorkerTools,
 				resumeAuthorization: (binding) => needsBudget(binding.profile) ? budget.check(effectiveRoutes(binding)).authorizationId : "native-account",
 				authorizeRequest: (_agent, binding) => {
@@ -11764,7 +11921,8 @@ async function apply(ctx, config = {}) {
 					if (!Number.isSafeInteger(body.revision) || Number(body.revision) < 0) throw new Error(bi("配置版本无效，请刷新后重试", "Invalid settings revision; refresh and retry"));
 					const pair = validatePairChoice(body.pair, await physicalCatalog());
 					const revision = store.writeDocument("settings:profile", Number(body.revision), modelProfileFromChoice(pair));
-					await getRuntime(await configuredProfile());
+					const profile = await configuredProfile();
+					await getRuntime(profile);
 					return json(res, 200, {
 						ok: true,
 						revision
@@ -11879,5 +12037,4 @@ async function apply(ctx, config = {}) {
 	}
 	ctx.logger.info("[my-plugins/dsh-model-fusion] loaded");
 }
-//#endregion
 export { ArtifactId, BudgetLedger, Config, DEFAULT_TEST_VERIFIERS, EpochId, FUSION_CONTEXT_BUDGET, FileFusionStore, FusionError, NEEDS_REPAIR, NativeRequestBudget, OUTCOME_UNKNOWN, OperationId, SPEND_UNAUTHORIZED, STORE_MIGRATION_REQUIRED, STORE_PROJECTION_VERSION, SessionId, SnapshotId, SqliteFusionStore, TERMINAL_PHASES, TaskId, USAGE_LEDGER_REQUIRED, UsdDecimal, WORK_ORDER_CONFLICT, WorkOrderId, WorkspaceWriteLease, answerApproval, apiEquivalentUsd, appendCapturedReviewResult, apply, assertCurrentSubject, assertFinalBudget, assertPlannedCheck, boundedOverflowRecovery, captureTicket, checkPlanDigest, classifyEffect, classifyReview, completeProfile, consumeApproval, createReviewTicket, digestOf, evaluateReport, failingRenameIo, ingestDurable, ingestObservation, inject, inputBudget, invocationHeader, loadJsonObject, loadPromptBundle, loadReviewOutboxByRequestId, loadSpendingAuthorization, measureRequest, memoryVerificationRegistry, name, neverMeansDeny, newLedger, normalizeTermination, normalizeUsage, observationFromNormalized, pendingDoesNotExpire, persistReviewRequest, priceUsage, projectLedger, promptDigests, promptManifest, quoteLedger, reconcile, reduce, reduceAll, reportSubject, requireStorageProjectionVersion, resolveBenchmarkOutputLimits, resolveInvocation, resolveProfile, restoreLedger, resultFromCapturedTicket, reviewAttemptFields, reviewOutboxRow, reviewReadinessReceipt, reviewRequestedEvent, runNativeBenchmark, sha256Hex, snapshotWorkspace, splitInput, toReducerReviewDecision };

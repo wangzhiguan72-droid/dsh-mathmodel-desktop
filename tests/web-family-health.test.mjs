@@ -71,3 +71,10 @@ test('0.4.11 health rejects missing, inactive, duplicate, extra, and retired row
   assert.equal(activeWebFamilyRows(null), null);
   assert.equal(hasCompleteWebFamily({}, '0.4.11'), false);
 });
+
+const inventory0419 = require('./fixtures/web-family-0.4.19-inventory.json');
+test('0.4.19 health accepts real tree-era inventory and rejects missing, duplicate or retired rows', () => {
+ const children=activeWebFamilyRows(inventory0419);assert.equal(hasCompleteWebFamily({children},'0.4.19'),process.platform==='win32');
+ for(const missing of children.filter(n=>!n.endsWith('dsh-liangshen')))assert.equal(hasCompleteWebFamily({children:children.filter(n=>n!==missing)},'0.4.19'),false,missing);
+ assert.equal(hasCompleteWebFamily({children:[...children,children[0]]},'0.4.19'),false);assert.equal(hasCompleteWebFamily({children:[...children,'@linxin666/dsh-client-ui-message-edit']},'0.4.19'),false);
+});

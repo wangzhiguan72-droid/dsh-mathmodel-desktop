@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url'
 const packageName = '@linxin666/dsh-client-ui-git-graph'
 const aggregateName = '@linxin666/dsh-web-all'
 const legacyVersion = '0.3.23'
-const nativeVersions = ['0.4.5', '0.4.7', '0.4.11', '0.4.12']
+const nativeVersions = ['0.4.5', '0.4.7', '0.4.11', '0.4.12', '0.4.14']
 // From 0.4.11 the aggregate is a thin loader and no longer embeds Git Graph.
-const thinAggregateVersions = ['0.4.11', '0.4.12']
+const thinAggregateVersions = ['0.4.11', '0.4.12', '0.4.19']
 const markers = ['\t\t//#region src/client/auto-isolation.ts',
   '\t\t//#region ../dsh-git-graph/src/client/auto-isolation.ts']
 const endMarker = '\t\t//#endregion'
@@ -120,8 +120,8 @@ export async function patchGitGraphProfile(profileDir) {
   for (const name of [packageName, aggregateName]) {
     const packageDir = path.join(profileDir, 'node_modules', ...name.split('/'))
     const meta = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'))
-    if (meta.name !== name || ![legacyVersion, ...nativeVersions].includes(meta.version) ||
-        (version !== undefined && meta.version !== version)) {
+    if (meta.name !== name || ![legacyVersion, ...nativeVersions, ...thinAggregateVersions].includes(meta.version) ||
+        (version !== undefined && meta.version !== version && !(version === '0.4.14' && meta.version === '0.4.19' && name === aggregateName))) {
       throw new Error(`Unsupported Git Graph package: ${meta.name}@${meta.version}`)
     }
     version = meta.version

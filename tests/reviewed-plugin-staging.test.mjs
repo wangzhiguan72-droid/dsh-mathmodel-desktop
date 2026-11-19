@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { reviewedPluginDigest, stageReviewedPlugin, verifyReviewedPlugin } from '../scripts/stage-reviewed-plugins.mjs';
+
+test('reviewed staging refreshes unchanged-version files and refuses stale or redirected distributions', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-reviewed-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const plugin = path.join(root, 'plugin'), profile = path.join(root, 'profile');
+  const target = path.join(profile, 'node_modules/dsh-context'), lock = path.join(root, 'lock.json');
+  fs.mkdirSync(path.join(plugin, 'lib'), { recursive: true });
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'package.json'), JSON.stringify({ name: 'dsh-context', version: '0.78.2+mathmodel.1' }));
+  fs.writeFileSync(path.join(plugin, 'lib/index.js'), 'export const patched = true;');
+  fs.writeFileSync(path.join(target, 'stale.js'), 'stale');
+  fs.writeFileSync(lock, JSON.stringify({ plugins: { 'dsh-context': { version: '0.78.2+mathmodel.1', sha256: reviewedPluginDigest(plugin) } } }));
+  stageReviewedPlugin(profile, plugin, 'dsh-context', lock);
+  assert.equal(fs.existsSync(path.join(target, 'stale.js')), false);
+  verifyReviewedPlugin(profile, plugin, 'dsh-context', lock);
+  fs.writeFileSync(path.join(target, 'lib/index.js'), 'old');
+  assert.throws(() => verifyReviewedPlugin(profile, plugin, 'dsh-context', lock), /mismatch/);
+  fs.writeFileSync(path.join(plugin, 'lib/index.js'), 'unexpected');
+  assert.throws(() => stageReviewedPlugin(profile, plugin, 'dsh-context', lock), /integrity mismatch/);
+  fs.writeFileSync(path.join(plugin, 'lib/index.js'), 'export const patched = true;');
+  fs.rmSync(target, { recursive: true });
+  const outside = path.join(root, 'outside'); fs.mkdirSync(outside);
+  fs.symlinkSync(outside, target, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => stageReviewedPlugin(profile, plugin, 'dsh-context', lock), /Unsafe/);
+});

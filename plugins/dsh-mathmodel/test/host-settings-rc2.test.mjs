@@ -26,7 +26,7 @@ async function fixture(t, oldSettings) {
     const ctx = new Context();
     const readPatch = () => fs.existsSync(patchFile) ? YAML.parse(fs.readFileSync(patchFile, 'utf8')) : {};
     const entry = { options: { id: 'mathmodel', name: '@deepseek-harness/dsh-mathmodel', config: readPatch() },
-      fiber: { uid: 1, state: 2, runtime: { Config }, config: Config(readPatch()), ctx } };
+      fiber: { uid: 1, state: 2, runtime: { Config }, effectiveConfig: Config(readPatch()), ctx } };
     const configEditor = {
       configuration: () => [{ entry, inherited: {}, override: readPatch() }],
       entries: () => [entry],
@@ -36,7 +36,7 @@ async function fixture(t, oldSettings) {
         const parsed = Config(next);
         fs.writeFileSync(patchFile, YAML.stringify(next));
         entry.options.config = next;
-        entry.fiber.config = parsed;
+        entry.fiber.effectiveConfig = parsed;
       },
     };
     ctx.provide('loader', { await: async () => {} });

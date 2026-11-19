@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "plugins": {
+    "@nanmicoder/dsh-agent-teams": {
+      "version": "0.1.30+mathmodel.2",
+      "sha256": "8a3fd7c7cf68eccd90312f0862e919aeb50a34d41ab6745d722adea130995546",
+      "provenance": {
+        "upstream": "4354b0f6a793b75c1904c0ee85eef4043a37c733",
+        "host": "0.2.2-rc.3",
+        "selection": "Audited new tree delivery and branch teardown with exact rc.3 cohort; preserved local strict peers",
+        "artifact": "Reviewed upstream prebuilt JavaScript, with source retained for audit; not locally compiled"
+      }
+    },
+    "dsh-context": {
+      "version": "0.85.1+mathmodel.2",
+      "sha256": "1f1cc3e9a05313a85d3e30f1578c423f0e60e07f5ce1384b878877837b514469",
+      "provenance": {
+        "base": "0.85.1",
+        "host": "0.2.2-rc.3",
+        "commits": [
+          "735dee19a4bab9feffbcac3748ca7fd3e65bc102",
+          "9e221195ac7c02cff9a21311dda6d61f50cf50d3"
+        ],
+        "reason": "New Session v4 and named subagent-tree data plane requires upstream compatibility implementation; preserving receiver ownership fix"
+      }
+    }
+  }
+}

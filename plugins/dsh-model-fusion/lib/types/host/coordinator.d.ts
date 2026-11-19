@@ -83,6 +83,8 @@ interface DelegateInput {
 }
 /** Whitespace-insensitive, otherwise exact: a requirement must be the user's own words. */
 export declare const normalizeQuote: (text: string) => string;
+export declare function isBareContinuation(text: string): boolean;
+export declare function directTurnLeavesWorkOpen(userTexts: readonly string[], assistantText: string): boolean;
 /** Literal code spans (`like this`) a requirement asks for; a candidate that omits them gets flagged. */
 export declare const literalSpans: (text: string) => string[];
 /**

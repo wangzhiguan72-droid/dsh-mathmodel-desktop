@@ -40,10 +40,10 @@ export function assertHostMutationAllowed(agents) {
   if (unsafe) throw new HostMutationLockedError();
 }
 
-/** Guard the pinned official 0.2.0-rc.2 change method before wrapping it. */
+/** Guard the audited official change methods before wrapping them. */
 export function isSupportedPluginManagerChangeSource(source) {
   return typeof source === 'string'
-    && /async\s+change\(operation,\s*request,\s*reason\)/.test(source)
+    && /async\s+change\(operation,\s*request,\s*reason(?:,\s*identity)?\)/.test(source)
     && /withFileLock\(/.test(source)
     && /await\s+operation\(result\)/.test(source)
     && /plugin-manager\/changed/.test(source);
@@ -64,12 +64,12 @@ export function installPluginManagerFreeze(manager, gate, readAgents) {
   const original = manager.change;
   const previousOwn = Object.getOwnPropertyDescriptor(manager, 'change');
   if (previousOwn && !('value' in previousOwn)) throw new Error('Unsupported dsh-plugin-manager change accessor');
-  const wrapped = function change(operation, request, reason) {
+  const wrapped = function change(operation, request, reason, ...rest) {
     if (typeof operation !== 'function') return Promise.reject(new TypeError('Plugin-manager change requires an operation'));
     return gate.write(() => original.call(this, async (result) => {
       assertHostMutationAllowed(await readAgents());
       return operation(result);
-    }, request, reason));
+    }, request, reason, ...rest));
   };
   Object.defineProperty(manager, 'change', {
     configurable: true,

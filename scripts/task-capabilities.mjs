@@ -22,9 +22,10 @@ export const STANDARD_PLUGIN_IDS = [
   'tool-fs', 'tool-fs-search', 'tool-jobs', 'tool-schedule', 'skill-filesystem',
   'tool-skill', 'command-goal', 'tool-goal', 'planning', 'compaction',
   'delegation', 'tool-ask-user', 'tool-todo', 'tool-web', 'present',
-  'tool-plugin-manager', 'tool-plugin-market',
+  'tool-office', 'tool-plugin-manager', 'tool-plugin-market',
 ];
-const LEGACY_STANDARD_PLUGIN_IDS = STANDARD_PLUGIN_IDS.filter(id => !['time-context', 'tool-schedule', 'tool-plugin-market'].includes(id));
+const RC5_STANDARD_PLUGIN_IDS = STANDARD_PLUGIN_IDS.filter(id => id !== 'tool-office');
+const LEGACY_STANDARD_PLUGIN_IDS = RC5_STANDARD_PLUGIN_IDS.filter(id => !['time-context', 'tool-schedule', 'tool-plugin-market'].includes(id));
 const parseOptions = { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }] };
 export function document(yaml, text) {
   const doc = yaml.parseDocument(text, parseOptions);
@@ -39,7 +40,7 @@ export function standardPresetDocument(runtimeRoot) {
   const standard = document(yaml, readFileSync(join(runtimeRoot, '@deepseek-ai/dsh-web-app/presets/standard.patch.yml'), 'utf8'));
   const source = standard.toJS()?.[0]?.insert?.[0];
   const roster = source?.config?.plugins?.map(plugin => plugin.id);
-  if (source?.id !== 'preset-standard' || !(isDeepStrictEqual(roster, STANDARD_PLUGIN_IDS) || isDeepStrictEqual(roster, LEGACY_STANDARD_PLUGIN_IDS))) {
+  if (source?.id !== 'preset-standard' || !(isDeepStrictEqual(roster, STANDARD_PLUGIN_IDS) || isDeepStrictEqual(roster, RC5_STANDARD_PLUGIN_IDS) || isDeepStrictEqual(roster, LEGACY_STANDARD_PLUGIN_IDS))) {
     throw new Error('Unsupported standard preset roster; inspect upstream changes');
   }
   const doc = standard.clone();
@@ -203,7 +204,11 @@ export function installTaskCapabilityPresets(options = {}) {
   const current = managedBlock(yaml, original, BEGIN, END);
   const legacy = managedBlock(yaml, original, BEGIN_V1, END_V1);
   if (current && !(current.managed.length === expected.length && expected.every((row, i) => isDeepStrictEqual(row, current.managed[i])))) {
-    throw new Error('Task capability conflict: managed definitions differ');
+    const digest = createHash('sha256').update(JSON.stringify(current.managed)).digest('hex');
+    if (digest !== 'ee59f5ab66287bcebeccb88542024ce4e9c75d04663202f05ec6a990883cb6eb') throw new Error('Task capability conflict: managed definitions differ');
+    const upgraded = replaceBlock(original, current, END, generated.yaml, END);
+    if (!apply) return result({ changed: true, migrated: true });
+    return result({ changed: true, migrated: true, applied: true, backup: writePatch(profilePatch, upgraded, { io, yaml, suffix: 'capabilities-022' }) });
   }
   if (legacy) {
     // Old sessions or a hand-edited block keep v1; v2 sits beside it until v1 can go.

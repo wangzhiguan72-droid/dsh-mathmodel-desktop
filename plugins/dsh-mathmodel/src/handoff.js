@@ -200,15 +200,18 @@ export function apply(ctx, config = {}, overrides = {}) {
     }
     children.set(id, { role: brief.role, files: new Set(brief.files.map(f => pathKey(f, cwd))), cwd });
     const end = { kind: 'end', id, status: 'blocked', files_changed: [], violations: [], stopReason: null };
-    let onAbort;
+    let onAbort, abortCleanup;
     try {
       await record(cwd, { kind: 'start', id, parent: exec.agent?.id, role: brief.role, title: brief.title, brief });
-      const activation = await ctx.subagents.startActivation({
-        provider: 'spawn', label: brief.title, childId: id, signal: exec.signal, delivery: 'caller',
-        request: { cwd, parent: exec.agent, prompt: [{ type: 'text', text: renderBrief(brief, { id }) }], agentOptions, outputSchema: receiptSchema(brief.role) },
-      });
+      const request = { cwd, parent: exec.agent, prompt: [{ type: 'text', text: renderBrief(brief, { id }) }], agentOptions, outputSchema: receiptSchema(brief.role), maxDepth: 1 };
+      const spec = { provider: 'spawn', label: brief.title, childId: id, signal: exec.signal, delivery: 'caller' };
+      const activation = await ctx.subagents.startActivation(typeof ctx.subagents.rootOf === 'function'
+        ? { ...spec, ...request }
+        : { ...spec, request });
       // dispose may reject; an unhandled rejection is fatal in the Host.
-      onAbort = () => { Promise.resolve().then(() => activation.dispose()).catch(() => {}); };
+      onAbort = () => {
+        abortCleanup ??= Promise.resolve().then(() => activation.dispose()).catch(error => { end.cleanupError = String(error.message ?? error); });
+      };
       exec.signal.addEventListener('abort', onAbort, { once: true });
       if (exec.signal.aborted) onAbort();
       const result = await activation.result;
@@ -231,6 +234,7 @@ export function apply(ctx, config = {}, overrides = {}) {
       throw error;
     } finally {
       if (onAbort) exec.signal.removeEventListener('abort', onAbort);
+      if (abortCleanup) await abortCleanup;
       writeLocks.release(id);
       children.delete(id);
       await record(cwd, end);

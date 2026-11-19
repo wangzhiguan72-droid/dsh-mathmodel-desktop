@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
+const { setTimeout: delay } = require('node:timers/promises');
 
 /**
  * Loopback ports a plain `dsh web` install owns (its CLI defaults). The
@@ -74,6 +75,11 @@ const OPTIONAL_WEB_FAMILY_ROWS_0411 = new Set([
   '@linxin666/dsh-client-ui-skill-explorer',
 ]);
 
+const WEB_FAMILY_ROWS_0419 = Object.freeze([
+  ...WEB_FAMILY_ROWS_0411.filter(name => name !== '@linxin666/dsh-client-ui-message-edit'),
+  '@linxin666/dsh-client-ui-task-board-team', '@linxin666/dsh-client-ui-diagrams',
+]);
+
 /** Active family package names from a plugin-manager listPlugins result. */
 function activeWebFamilyRows(inventory) {
   const rows = Array.isArray(inventory) ? inventory : inventory?.plugins;
@@ -83,11 +89,12 @@ function activeWebFamilyRows(inventory) {
 }
 
 function hasCompleteWebFamily(rows, version = '0.4.5') {
-  if (version === '0.4.11' || version === '0.4.12') {
+  if (version === '0.4.11' || version === '0.4.12' || version === '0.4.19') {
     const children = rows?.children;
     if (!Array.isArray(children) || new Set(children).size !== children.length) return false;
-    const required = new Set(WEB_FAMILY_ROWS_0411);
-    return WEB_FAMILY_ROWS_0411.every(name => children.includes(name)) &&
+    const names = version === '0.4.19' ? WEB_FAMILY_ROWS_0419 : WEB_FAMILY_ROWS_0411;
+    const required = new Set(names);
+    return names.every(name => children.includes(name)) &&
       children.every(name => required.has(name) || OPTIONAL_WEB_FAMILY_ROWS_0411.has(name));
   }
   const children = rows?.children;
@@ -279,7 +286,6 @@ function childEnv(home, nodeHome, platform = process.platform, baseEnv = process
 function ensureProfileFallbacks(home, hostRuntimeDir, profileName = 'web') {
   const profileDir = path.join(home, 'profiles', profileName);
   const profilePkgFile = path.join(profileDir, 'package.json');
-  if (!fs.existsSync(profilePkgFile)) return;
 
   let manifest;
   try {
@@ -316,9 +322,9 @@ function ensureProfileFallbacks(home, hostRuntimeDir, profileName = 'web') {
     }
   };
 
+  const presentPeers = new Set();
   for (const pluginName of allPluginNames) {
     const pluginPkg = path.join(profileModulesDir, pluginName, 'package.json');
-    if (!fs.existsSync(pluginPkg)) continue;
     let pkg;
     try {
       pkg = JSON.parse(fs.readFileSync(pluginPkg, 'utf8'));
@@ -327,8 +333,12 @@ function ensureProfileFallbacks(home, hostRuntimeDir, profileName = 'web') {
     }
     const peers = Object.keys(pkg.peerDependencies || {});
     for (const peer of peers) {
+      if (presentPeers.has(peer)) continue;
       const targetInProfile = path.join(profileModulesDir, peer);
-      if (fs.existsSync(targetInProfile)) continue;
+      if (fs.existsSync(targetInProfile)) {
+        presentPeers.add(peer);
+        continue;
+      }
 
       for (const sourceRoot of candidateSourceDirs) {
         const candidate = path.join(sourceRoot, peer);
@@ -640,9 +650,8 @@ async function waitForGui(port, options) {
   const deadline = Date.now() + options.deadlineMs;
   for (;;) {
     if (!options.isAlive()) throw new Error('the dsh host process exited before the GUI became ready');
-    if (await probeGui(url, 1500)) {
-      if (!options.getTokenUrl) return;
-      const tokenUrl = options.getTokenUrl();
+    const tokenUrl = options.getTokenUrl?.();
+    if (tokenUrl || !options.getTokenUrl) {
       if (tokenUrl) {
         const endpoint = new URL(tokenUrl);
         if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1'
@@ -650,11 +659,16 @@ async function waitForGui(port, options) {
           || !endpoint.searchParams.get('token')) {
           throw new Error('the dsh host published an unexpected GUI endpoint');
         }
-        return tokenUrl;
       }
+      if (await probeGui(url, 1500)) return tokenUrl;
     }
-    if (Date.now() > deadline) throw new Error(`timed out after ${Math.round(options.deadlineMs / 1000)}s waiting for ${url}`);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`timed out after ${Math.round(options.deadlineMs / 1000)}s waiting for ${url}`);
+    // When stdout announces readiness, verify HTTP immediately. Until then,
+    // requesting the index repeatedly makes the host render it during startup.
+    const signal = !tokenUrl && !options.announcement?.aborted ? options.announcement : undefined;
+    try { await delay(Math.min(remaining, 500), undefined, { signal }); }
+    catch (error) { if (error.name !== 'AbortError') throw error; }
   }
 }
 
@@ -696,6 +710,7 @@ module.exports = {
   SEED_MARKER,
   EXPECTED_WEB_FAMILY_ROWS,
   WEB_FAMILY_ROWS_0411,
+  WEB_FAMILY_ROWS_0419,
   activeWebFamilyRows,
   hasCompleteWebFamily,
   RUNTIME_STAMP,

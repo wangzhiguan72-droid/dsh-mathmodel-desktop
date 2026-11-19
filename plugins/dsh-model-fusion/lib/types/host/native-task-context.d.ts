@@ -11,7 +11,7 @@ export declare class NativeTaskContext {
     readonly store: SqliteFusionStore;
     readonly parent: (id: string) => Agent | undefined;
     constructor(store: SqliteFusionStore, parent: (id: string) => Agent | undefined);
-    begin(agent: Agent, taskId: TaskId): void;
+    begin(agent: Agent, taskId: TaskId, firstSeq?: import("@deepseek-ai/dsh-session").SessionLogOffset): void;
     /**
      * `compact` is appended on every changed step: it carries only state the
      * native history does not already hold, so the expensive Lead does not

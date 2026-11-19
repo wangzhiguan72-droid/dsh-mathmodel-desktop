@@ -7,7 +7,7 @@ import type { SqliteFusionStore } from '../task/sqlite-store.js';
 export declare function workerBriefs(store: SqliteFusionStore, taskId: TaskId): {
     revision: number;
     deliveryId: string;
-    source: "lead-tool-feedback";
+    source: 'lead-tool-feedback';
     nativeCallId: string;
     payloadRef: string;
     feedback: string;
@@ -18,9 +18,7 @@ export declare function workerBriefs(store: SqliteFusionStore, taskId: TaskId): 
  * user input and the frozen work order are retained separately by NativeTaskContext.
  */
 export declare function workerHandoffProjection(store: SqliteFusionStore, taskId: TaskId): {
-    latestBriefRevision: number;
-    historyDigest: import("../contracts.js").Digest;
-    policy: "recent-whole-records-utf8-v1";
+    policy: 'recent-whole-records-utf8-v1';
     contentByteBudget: number;
     totalRecords: number;
     omittedRecords: number;
@@ -28,31 +26,33 @@ export declare function workerHandoffProjection(store: SqliteFusionStore, taskId
     retainedContentBytes: number;
     records: {
         revision: number;
-        source: "lead-tool-handoff" | "lead-tool-feedback";
+        source: 'lead-tool-handoff' | 'lead-tool-feedback';
         sourceId: string;
         payloadRef: string;
         content: string;
     }[];
     schemaVersion: 1;
+    latestBriefRevision: number;
+    historyDigest: import("../contracts.js").Digest;
 };
 /** Brief bodies already arrive as native messages; the snapshot pins only their identity and digests. */
 export declare function compactHandoffs(projection: ReturnType<typeof workerHandoffProjection>): {
-    records: {
-        contentDigest: import("../contracts.js").Digest;
-        revision: number;
-        source: "lead-tool-handoff" | "lead-tool-feedback";
-        sourceId: string;
-        payloadRef: string;
-    }[];
-    latestBriefRevision: number;
-    historyDigest: import("../contracts.js").Digest;
-    policy: "recent-whole-records-utf8-v1";
+    policy: 'recent-whole-records-utf8-v1';
     contentByteBudget: number;
     totalRecords: number;
     omittedRecords: number;
     totalContentBytes: number;
     retainedContentBytes: number;
     schemaVersion: 1;
+    latestBriefRevision: number;
+    historyDigest: import("../contracts.js").Digest;
+    records: {
+        revision: number;
+        source: 'lead-tool-handoff' | 'lead-tool-feedback';
+        sourceId: string;
+        payloadRef: string;
+        contentDigest: import("../contracts.js").Digest;
+    }[];
 };
 export declare function assertWorkerBriefRequest(store: SqliteFusionStore, taskId: TaskId, request: GenerateOptions): void;
 /** Bind model-generated tools to the brief that their exact native request saw. */

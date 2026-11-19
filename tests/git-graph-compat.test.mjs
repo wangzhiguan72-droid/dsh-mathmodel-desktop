@@ -12,7 +12,7 @@ const vendor = path.join(root, 'runtime/profile-web/node_modules/@linxin666/dsh-
 const aggregateVendor = path.join(root, 'runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js')
 const installedFamily = JSON.parse(await readFile(path.join(path.dirname(aggregateVendor), '..', 'package.json'), 'utf8')).version
 // From 0.4.11 the aggregate is a thin loader without its own Git Graph copy.
-const thinAggregate = ['0.4.11', '0.4.12'].includes(installedFamily)
+const thinAggregate = ['0.4.11', '0.4.12', '0.4.19'].includes(installedFamily)
 const begin = '\t\t//#region src/client/auto-isolation.ts'
 const end = '\t\t//#endregion'
 
@@ -229,8 +229,8 @@ test('installed native Git Graph routes new sessions through uiWorkspace without
     const packageDir = path.join(ownTemp, 'node_modules', '@linxin666', name)
     await mkdir(path.join(packageDir, 'lib'), { recursive: true })
     assert.equal(JSON.parse(await readFile(path.join(path.dirname(source), '..', 'package.json'), 'utf8')).version,
-      installedFamily, `${name} fixture must use the real installed family source`)
-    await writeFile(path.join(packageDir, 'package.json'), JSON.stringify({ name: '@linxin666/' + name, version: installedFamily }))
+      (installedFamily === '0.4.19' && name === 'dsh-client-ui-git-graph' ? '0.4.14' : installedFamily), `${name} fixture must use the real installed family source`)
+    await writeFile(path.join(packageDir, 'package.json'), JSON.stringify({ name: '@linxin666/' + name, version: JSON.parse(await readFile(path.join(path.dirname(source), '..', 'package.json'), 'utf8')).version }))
     const target = path.join(packageDir, 'lib', 'client.js')
     const bytes = await readFile(source)
     await writeFile(target, bytes)

@@ -5,7 +5,9 @@
  * actually present. They do not read a version string.
  */
 
-export const supportedDshVersions = '0.2.0-rc.2 and 0.2.1-rc.2'
+export const supportedDshVersions = '0.2.0-rc.2, 0.2.1-rc.*, and 0.2.2-rc.3'
+
+export const hasSubagentTree = (api: object): boolean => typeof (api as { rootOf?: unknown }).rootOf === 'function'
 
 export function hasStartActivation(subagents: object): boolean {
   return typeof (subagents as { startActivation?: unknown }).startActivation === 'function'

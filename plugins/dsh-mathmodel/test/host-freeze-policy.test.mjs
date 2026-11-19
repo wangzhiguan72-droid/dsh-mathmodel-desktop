@@ -126,5 +126,5 @@ test('wrapper refuses unsupported method shape and restores only its own layer',
 
 test('shape contract matches bundled official plugin manager 0.2.0-rc.2', async () => {
   const source = await readFile(fileURLToPath(new URL('../../../runtime/host/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js', import.meta.url)), 'utf8');
-  assert.equal(isSupportedPluginManagerChangeSource(source.slice(source.lastIndexOf('async change(operation, request, reason)'))), true);
+  assert.equal(isSupportedPluginManagerChangeSource(source.slice(source.lastIndexOf('async change(operation, request, reason'))), true);
 });

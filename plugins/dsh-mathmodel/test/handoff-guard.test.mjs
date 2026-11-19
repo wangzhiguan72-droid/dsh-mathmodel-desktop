@@ -47,7 +47,7 @@ test('守卫经 ToolRuntime 生效', t => {
   t.after(root.tools.guard(childGuard));
   t.after(() => children.clear());
   children.set('c1', { role: 'review', files: new Set(), cwd: 'D:/r' });
-  assert.match(root.tools.guardReason({ agent: { id: 'c1' }, name: 'write', arguments: { file_path: 'x' } }), /只读/);
+  assert.match(root.tools.checkGuards({ agent: { id: 'c1' }, name: 'write', arguments: { file_path: 'x' } })?.reason, /只读/);
 });
 
 test('子代理不能动门禁、项目状态、定时任务与插件管理；只读的 mm_* 照常', t => {

@@ -29,6 +29,8 @@ type Owner = {
 };
 interface Callbacks {
     owner(agent: Agent): Owner | undefined;
+    /** Effective route and its generation; a frozen profile does not follow model switches. */
+    routeKey?(owner: Owner): string;
     allowed(agent: Agent, owner: Owner): boolean;
     failed(agent: Agent, reason: string): void;
     /** Per-model mode and interval (user setting, learned, defaults); absent: the pair profile and a fixed interval. */

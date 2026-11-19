@@ -26,6 +26,7 @@ import { patchSessionExternalEvents } from './patch-session-external-events.mjs'
 import { patchDesktopUpdateProfile } from './patch-desktop-update-entry.mjs';
 import { patchWebAllDesktopLinksProfile, patchSshDesktopLinksProfile } from './patch-web-all-desktop-links.mjs';
 import { assertSandboxAutoProfileManifest, stageSandboxAutoPlugin } from './stage-sandbox-auto.mjs';
+import { stageReviewedPlugins } from './stage-reviewed-plugins.mjs';
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeSrc = path.join(desktopDir, 'runtime');
@@ -305,7 +306,9 @@ export function verifyStagedFusion(profileDir, pluginDir, lockFile = fusionBuild
 }
 
 export function stageFusionPlugin(profileDir, pluginDir, lockFile = fusionBuildLock) {
-  assertRealTree(pluginDir);
+  // Development dependencies are not runtime assets and may be junctions.
+  // Validate the package root and every copied asset, without following them.
+  if (!fs.lstatSync(pluginDir).isDirectory() || fs.lstatSync(pluginDir).isSymbolicLink()) throw new Error('Unsafe Fusion plugin root');
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf8'));
   if (manifest.name !== 'dsh-model-fusion' || manifest.exports?.['.']?.import !== './lib/dsh-model-fusion.js') {
     throw new Error('Unexpected Fusion plugin identity');
@@ -496,6 +499,7 @@ async function main() {
   fs.copyFileSync(path.join(desktopDir, 'src', 'host-compile-cache.cjs'), path.join(stagingRoot, 'host', 'startup-cache.cjs'));
   stageFusionPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-model-fusion'));
   stageSandboxAutoPlugin(path.join(stagingRoot, 'profile-web'), path.join(desktopDir, 'plugins', 'dsh-auto-mode'));
+  stageReviewedPlugins(path.join(stagingRoot, 'profile-web'));
   assertSandboxAutoProfileManifest(path.join(stagingRoot, 'profile-web'));
   await patchSessionExternalEvents({ runtimeRoot: path.join(stagingRoot, 'host', 'node_modules') });
   if (!localOnly) {

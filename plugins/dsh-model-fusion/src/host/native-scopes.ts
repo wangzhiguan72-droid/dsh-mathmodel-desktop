@@ -1,3 +1,4 @@
+import { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -86,11 +87,22 @@ export class NativeFusionScopes {
         // Any concrete allowlist is presented natively, including an implement-mode
         // Worker on 0.2.1 whose ceiling moved here from the removed start-time toolFilter.
         // 0.2.0 implement mode still returns undefined, so this call does not start applying there.
-        stageDisposers.push(scope.tools.presentAs('native'))
+        if (typeof (scope.tools as unknown as { presentAs?: unknown }).presentAs === 'function') stageDisposers.push((scope.tools as unknown as { presentAs(mode: string): () => void }).presentAs('native'))
       }
       presentationKey = key
     }
     // Register the deny-only native guard first. A failed partial install stays closed.
+    if (typeof scope.tools.resolve === 'function') {
+      const native = new NativeToolExecutor(scope)
+      entry.dispose.push(scope.tools.setExecutor({
+        describe: definitions => {
+          const permitted = readOnlyTools === undefined ? definitions : definitions.filter(definition =>
+            readOnlyTools!.includes(definition.name) || role === 'worker' && ['fusion_read_state', 'fusion_read_evidence', 'fusion_submit_result'].includes(definition.name))
+          return native.describe(permitted)
+        },
+        execute: input => native.execute(input),
+      }))
+    }
     entry.dispose.push(scope.tools.guard(exec => {
       if (!entry.ready) return 'Fusion scope initialization failed'
       return this.callbacks.canExecute(exec, entry.binding, role)
@@ -132,14 +144,15 @@ export class NativeFusionScopes {
       // registry. Required means "this agent registered it and the role may see
       // it", so a legacy allowlist that names a model-like-only tool is not a gap.
       // The deny-only guard still rejects a hidden local tool that was not restored.
+      const treeTools = typeof scope.tools.resolve === 'function'
       const projected = projectRoleTools({
-        assembled: assembled.tools,
+        assembled: treeTools ? scope.tools.schemas(agent) : (assembled as unknown as { tools: ReturnType<typeof scope.tools.schemas> }).tools,
         allowlist: readOnlyTools,
         registry: scope.tools.schemas(agent),
         always: role === 'worker' ? ['fusion_read_state', 'fusion_read_evidence', 'fusion_submit_result'] : [],
       })
       if (projected.missing.length) throw new Error(fusionToolDiagnostic(projected.missing))
-      return { ...assembled, variables: { ...assembled.variables, provider: route.provider, model: route.model }, tools: projected.tools }
+      return { ...assembled, variables: { ...assembled.variables, provider: route.provider, model: route.model }, ...(treeTools ? {} : { tools: projected.tools }) }
     }, { prepend: true }))
     entry.dispose.push(scope.on('agent/request', async ({ agent: requesting, turn, step, signal }, next) => {
       this.assertReady(requesting)
@@ -170,8 +183,11 @@ export class NativeFusionScopes {
       return { ...rest, provider: route.provider, model: route.model, maxTokens,
         ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) }) }
     }, { prepend: true }))
-    entry.refreshTools()
+    // Register before the first refresh. refreshTools() snapshots presentAs/restrict,
+    // and a later assemble returns early when the allowlist key is unchanged, so a
+    // refresh that runs first omits Fusion tools for the opening turn.
     entry.dispose.push(...this.callbacks.installTools(scope, agent, entry.binding, role))
+    entry.refreshTools()
     entry.ready = true
   }
 

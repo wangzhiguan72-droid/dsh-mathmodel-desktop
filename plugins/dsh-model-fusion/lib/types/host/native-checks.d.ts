@@ -22,9 +22,9 @@ export interface CheckDefinition {
     baseline?: 'no-new-failures';
 }
 /** Parsers that name each failing test, which baseline-relative checks need. Mocha's default report spreads a name over several lines. */
-export declare const BASELINE_PARSERS: readonly ["unittest", "pytest", "vitest", "jest", "tap", "go", "cargo"];
+export declare const BASELINE_PARSERS: readonly ['unittest', 'pytest', 'vitest', 'jest', 'tap', 'go', 'cargo'];
 export type BaselineParser = typeof BASELINE_PARSERS[number];
-export declare const TEST_PARSERS: readonly ["unittest", "pytest", "vitest", "jest", "mocha", "tap", "go", "cargo"];
+export declare const TEST_PARSERS: readonly ['unittest', 'pytest', 'vitest', 'jest', 'mocha', 'tap', 'go', 'cargo'];
 export type TestParser = typeof TEST_PARSERS[number];
 export declare const MAX_CHECK_SECONDS = 3600;
 export interface FrozenCheck {

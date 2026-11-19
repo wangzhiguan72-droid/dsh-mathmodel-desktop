@@ -1,3 +1,4 @@
+import { appendMathmodelRecord, mathmodelRecordType, isDirectChild } from './session-records.js';
 import { z } from 'zod';
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol';
 
@@ -29,9 +30,9 @@ export const taskToolSwitchProjection = {
   key: 'mathmodelToolSwitches',
   stateSchema: switchesSchema.nullable(),
   init: () => null,
-  apply: (state, event) => event.type === 'mathmodel/tool-switches' ? normalizeToolSwitches(event.data) : state,
+  apply: (state, event) => mathmodelRecordType(event) === 'mathmodel/tool-switches' ? normalizeToolSwitches(event.data) : state,
   wire: { viewSchema: switchesSchema.nullable(), view: state => state },
-  stateVersion: 1,
+  stateVersion: 2,
 };
 
 // Schemas the model may see. Before the first turn it follows the selection; after it only widens,
@@ -49,12 +50,12 @@ export const taskToolWireProjection = {
   init: () => ({ selection: null, started: false }),
   apply: (state, event) => {
     if (event.type === 'turn/start') return state.started ? state : { ...state, started: true };
-    if (event.type !== 'mathmodel/tool-switches') return state;
+    if (mathmodelRecordType(event) !== 'mathmodel/tool-switches') return state;
     const next = normalizeToolSwitches(event.data);
     return { ...state, selection: state.started ? widen(normalizeToolSwitches(state.selection), next) : next };
   },
   wire: { viewSchema: wireSchema, view: state => state },
-  stateVersion: 1,
+  stateVersion: 2,
 };
 
 const WEB_TOOLS = new Set(['web_fetch', 'web_search']);
@@ -119,13 +120,13 @@ export function installAgentToolSwitches(agent, readSelection, rootContext = age
 
 export class TaskToolSwitchController {
   #installed = new Map();
-  constructor({ agents, projections }) { Object.assign(this, { agents, projections }); }
+  constructor({ agents, subagents, projections }) { Object.assign(this, { agents, subagents, projections }); }
   agent(sessionId) {
     const agent = this.agents.get(sessionId);
     if (!agent) throw new RemoteError('capabilities/session-unavailable', '请打开当前任务后再配置能力。', {});
     return agent;
   }
-  selection(agent) { return normalizeToolSwitches(this.projections.stateOf(agent.session, 'mathmodelToolSwitches')); }
+  selection(agent) { const own = this.projections.stateOf(agent.session, 'mathmodelToolSwitches'); const parent = own == null ? this.ownerOf(agent) : null; return parent ? this.selection(parent) : normalizeToolSwitches(own); }
   // An owned child also keeps its parent's offered schemas, so a fork can reuse the inherited prefix.
   wireSelection(agent) {
     const own = normalizeToolSwitches(this.projections.stateOf(agent.session, 'mathmodelToolSwitchWire')?.selection);
@@ -136,7 +137,7 @@ export class TaskToolSwitchController {
     const header = agent.session.header;
     if (header?.origin !== 'subagent' || !header.parentSession) return null;
     const parent = this.agents.get(header.parentSession);
-    return parent && this.agents.isOwnedBy?.(agent.id, parent) ? parent : null;
+    return isDirectChild(this.agents, this.subagents, agent, parent) ? parent : null;
   }
   descendantsOf(agent) {
     if (typeof this.agents.list !== 'function') throw new RemoteError('capabilities/agents-unavailable', '无法核对运行中的子任务，工具开关未修改。', {});
@@ -149,7 +150,7 @@ export class TaskToolSwitchController {
       for (const candidate of all) {
         if (visited.has(candidate.id) || candidate.session.header?.origin !== 'subagent'
             || candidate.session.header.parentSession !== parent.id
-            || !this.agents.isOwnedBy?.(candidate.id, parent)) continue;
+            || !isDirectChild(this.agents, this.subagents, candidate, parent)) continue;
         visited.add(candidate.id);
         descendants.push(candidate);
         queue.push(candidate);
@@ -168,8 +169,8 @@ export class TaskToolSwitchController {
     const parent = this.ownerOf(agent);
     if (parent) {
       const inherited = this.selection(parent);
-      if (JSON.stringify(this.selection(agent)) !== JSON.stringify(inherited)) {
-        agent.session.append('mathmodel/tool-switches', inherited, { ignorable: true });
+      if (JSON.stringify(normalizeToolSwitches(this.projections.stateOf(agent.session, 'mathmodelToolSwitches'))) !== JSON.stringify(inherited)) {
+        appendMathmodelRecord(agent.session, 'mathmodel/tool-switches', inherited);
       }
     }
     this.track(agent, installAgentToolSwitches(agent, () => this.selection(agent), rootContext, () => this.wireSelection(agent)));
@@ -199,10 +200,10 @@ export class TaskToolSwitchController {
     for (const child of descendants) assertTaskIdle(child, this.projections.stateOf(child.session, 'turnBoundary'));
     const next = normalizeToolSwitches(selection);
     for (const child of descendants) {
-      child.session.append('mathmodel/tool-switches', next, { ignorable: true });
+      appendMathmodelRecord(child.session, 'mathmodel/tool-switches', next);
       this.#installed.get(child.id)?.refresh();
     }
-    agent.session.append('mathmodel/tool-switches', next, { ignorable: true });
+    appendMathmodelRecord(agent.session, 'mathmodel/tool-switches', next);
     this.#installed.get(agent.id)?.refresh();
     return this.describe(sessionId);
   }

@@ -90,6 +90,8 @@ exports.copyStagedRuntime = copyStagedRuntime;
 exports.configureArchiveFilter = configureArchiveFilter;
 exports.default = async context => {
   const { verifyStagedSandboxAuto } = await import('./stage-sandbox-auto.mjs');
+  const { verifyReviewedPlugins } = await import('./stage-reviewed-plugins.mjs');
+  verifyReviewedPlugins(path.join(stagingRoot, 'profile-web'));
   verifyStagedSandboxAuto(path.join(stagingRoot, 'profile-web'), path.join(__dirname, '..', 'plugins', 'dsh-auto-mode'));
   return copyStagedRuntime(context, stagingRoot, path.join(__dirname, '..', 'plugins', 'dsh-model-fusion'));
 };

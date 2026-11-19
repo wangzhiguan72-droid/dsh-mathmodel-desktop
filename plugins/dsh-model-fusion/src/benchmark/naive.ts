@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { hasStartActivation, requireSubagentMethod } from '../host/subagent-seam.js'
+import { hasStartActivation, hasSubagentTree, requireSubagentMethod } from '../host/subagent-seam.js'
 import type { PairProfile } from '../contracts.js'
 import { digestOf } from '../digest.js'
 import type { SqliteFusionStore } from '../task/sqlite-store.js'
@@ -43,12 +43,16 @@ interface NaiveSubagents {
     readonly provider: string
     readonly label: string
     readonly delivery: 'caller'
-    readonly request: {
+    readonly request?: {
       readonly parent: Agent
       readonly prompt: readonly { readonly type: 'text'; readonly text: string }[]
       readonly agentOptions: object
       readonly maxDepth: number
     }
+    readonly parent?: Agent
+    readonly prompt?: readonly { readonly type: 'text'; readonly text: string }[]
+    readonly agentOptions?: object
+    readonly maxDepth?: number
     readonly signal: AbortSignal
   }): Promise<{ readonly childId: SessionId; readonly result: Promise<NaiveResult>; dispose(): Promise<void> }>
   start?(provider: string, request: {
@@ -149,7 +153,7 @@ export class NaiveCoordinator {
         maxTokens: this.workerMaxTokens }
       const maxDepth = (this.parent.session.header.delegationDepth ?? 0) + 1
       const runSignal = AbortSignal.any([signal, controller.signal])
-      const subagents = this.ctx.subagents as NaiveSubagents
+      const subagents = this.ctx.subagents as unknown as NaiveSubagents
       // 0.2.1: `startActivation` with `delivery: 'caller'` returns the result to
       // the calling tool and does not push it into the Lead inbox. 0.2.0: the
       // one-shot `start`, with persona and toolFilter still on the request.
@@ -157,7 +161,7 @@ export class NaiveCoordinator {
       if (start === 'startActivation') {
         const activation = await subagents.startActivation!({
           provider: 'spawn', label: `Naive Worker ${row.ordinal}`, delivery: 'caller',
-          request: { parent: this.parent, prompt, agentOptions, maxDepth }, signal: runSignal,
+          ...(hasSubagentTree(this.ctx.subagents) ? { parent: this.parent, prompt, agentOptions, maxDepth } : { request: { parent: this.parent, prompt, agentOptions, maxDepth } }), signal: runSignal,
         })
         started = { childId: activation.childId, result: activation.result, dispose: () => activation.dispose(), readChild: 'registry' }
       } else {

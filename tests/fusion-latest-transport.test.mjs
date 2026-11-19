@@ -8,8 +8,11 @@ const root = path.resolve(import.meta.dirname, '..');
 const bundle = fs.readFileSync(path.join(root, 'plugins/dsh-model-fusion/lib/dsh-model-fusion.js'), 'utf8');
 // Upstream 0.2.8 picks the subagent API by presence (subagent-seam.ts), so load that
 // region together with the transport class.
-const start = bundle.indexOf('//#region src/host/subagent-seam.ts');
-const end = bundle.indexOf('//#endregion', bundle.indexOf('var NativeWorkerTransport = class {'));
+const legacyRegions = bundle.includes('//#region src/host/subagent-seam.ts');
+const start = bundle.indexOf(legacyRegions ? '//#region src/host/subagent-seam.ts' : '// src/host/subagent-seam.ts\n');
+const workerStart = bundle.indexOf('var NativeWorkerTransport = class {');
+const nextModule = /\n\/\/ src\//g; nextModule.lastIndex = workerStart;
+const end = legacyRegions ? bundle.indexOf('//#endregion', workerStart) : (nextModule.exec(bundle)?.index ?? bundle.length);
 assert.ok(start >= 0 && end > start);
 const Transport = vm.runInNewContext(`${bundle.slice(start, end)}\nNativeWorkerTransport`, {
   SessionId$1: value => value,
@@ -73,4 +76,33 @@ test('Fusion worker scope keeps the configured tool ceiling after the API migrat
   assert.match(scopes, /if \(role === 'worker'\) stageDisposers\.push\(scope\.tools\.restrict\(\{ allow: tools \}\)\)/);
   assert.match(bundle, /return hasStartActivation\(this\.ctx\.subagents\) \? \[\.\.\.this\.options\.workerTools\] : void 0;/);
   assert.match(bundle, /if \(role === "worker"\) stageDisposers\.push\(scope\.tools\.restrict\(\{ allow: tools \}\)\);/);
+});
+
+test('Fusion tree activation uses flat input and disposes only its exact Worker', async () => {
+  const parent = { id: 'lead', session: { header: {} } };
+  const resident = new Map([['sibling', { id: 'sibling' }]]);
+  let spec, disposed = 0;
+  const ctx = {
+    agents: { get: id => resident.get(id) },
+    subagents: {
+      rootOf: () => parent,
+      getProvider: () => ({ prepareContinuable() {}, inheritsParentContext: false }),
+      async startActivation(input) {
+        spec = input;
+        resident.set(input.childId, { id: input.childId, session: { header: { parentSession: parent.id } } });
+        return { childId: input.childId, messageId: 'accepted-tree', result: Promise.resolve({ stopReason: 'completed' }),
+          async dispose() { disposed++; resident.delete(input.childId); } };
+      },
+    },
+  };
+  const transport = new Transport(ctx);
+  await transport.start(parent, { childId: 'worker-tree', label: 'work', brief: 'task', route: { provider: 'fixture', model: 'worker' } }, new AbortController().signal);
+  assert.equal(spec.parent, parent);
+  assert.equal('request' in spec, false);
+  assert.equal(spec.prompt[0].text, 'task');
+  assert.equal(spec.agentOptions.model, 'worker');
+  await transport.release(parent, 'worker-tree');
+  assert.equal(disposed, 1);
+  assert.equal(resident.has('worker-tree'), false);
+  assert.equal(resident.has('sibling'), true);
 });

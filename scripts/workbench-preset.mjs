@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import fs, { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { document, yamlAt, standardPresetDocument, replaceDelegation, managedBlock, appendBlock, writePatch } from './task-capabilities.mjs';
+import { document, yamlAt, standardPresetDocument, replaceDelegation, managedBlock, replaceBlock, appendBlock, writePatch } from './task-capabilities.mjs';
 
 const DEFAULT_RUNTIME_ROOT = fileURLToPath(new URL('../resources/runtime/host/node_modules', import.meta.url));
 const BEGIN = '# BEGIN DSH math workbench v1';
@@ -32,7 +33,11 @@ export function installWorkbenchPreset({ runtimeRoot = DEFAULT_RUNTIME_ROOT, pro
     if (block.managed.length === expected.length && expected.every((row, i) => isDeepStrictEqual(row, block.managed[i]))) {
       return { ...generated, applied: false, changed: false, backup: null };
     }
-    throw new Error('Workbench preset conflict: managed definitions differ');
+    const digest = createHash('sha256').update(JSON.stringify(block.managed)).digest('hex');
+    if (digest !== '2af5acff4d558ac1ded578c3855147f0eb6de0963a079f82a802931d37271ba0') throw new Error('Workbench preset conflict: managed definitions differ');
+    if (!apply) return { ...generated, applied: false, changed: true, backup: null };
+    const backup = writePatch(profilePatch, replaceBlock(original, block, END, generated.yaml, END), { io, yaml, suffix: 'workbench-022' });
+    return { ...generated, applied: true, changed: true, backup };
   }
   if (!apply) return { ...generated, applied: false, changed: true, backup: null };
   const backup = writePatch(profilePatch, appendBlock(original, generated.yaml), { io, yaml, suffix: 'workbench' });

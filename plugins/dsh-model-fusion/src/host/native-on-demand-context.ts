@@ -1,3 +1,4 @@
+import type {} from '@deepseek-ai/dsh-compaction'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Role } from '../contracts.js'
@@ -32,7 +33,7 @@ export class NativeOnDemandContext {
     const id = this.id(agent, binding), prior = this.store.readDocument(id)
     const saved = prior?.value as Restore | undefined
     const key = cold && previousRequest !== undefined ? `cold:${previousRequest}:compact:${compact ?? 'none'}`
-      : saved?.compaction === (compact ?? null) ? saved.key : compact !== undefined ? `compact:${compact}` : undefined
+      : saved !== undefined && saved.compaction === (compact ?? null) ? saved.key : compact !== undefined ? `compact:${compact}` : undefined
     if (!key) return undefined
     const row = saved?.key === key ? saved : { key, compaction: compact ?? null, restored: false }
     if (row !== saved) this.store.writeDocument(id, prior?.revision ?? 0, row)

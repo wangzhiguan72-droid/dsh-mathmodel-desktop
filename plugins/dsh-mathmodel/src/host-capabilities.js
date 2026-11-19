@@ -1,3 +1,4 @@
+import { appendMathmodelRecord, mathmodelRecordType, isDirectChild } from './session-records.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -26,14 +27,14 @@ function sorted(value) {
 export const capabilityDigest = value => createHash('sha256').update(JSON.stringify(sorted(value))).digest('hex');
 // Official external-event compatibility marker; the bundled append bridge forwards it.
 // Managed presets still reject execution when this Host guard is unavailable.
-const appendCapabilityEvent = (session, type, data) => session.append(type, data, { ignorable: true });
+const appendCapabilityEvent = appendMathmodelRecord;
 const snapshotSchema = z.object({ schema: z.literal(1), preset: z.string(), hostHash: z.string(), globalToolsHash: z.string(), confirmedAt: z.string(), inventory: z.array(z.unknown()), inheritedFrom: z.string().optional(), blockedReason: z.string().optional() });
 export const capabilityProjection = {
   key: 'mathmodelCapabilities', stateSchema: snapshotSchema.nullable(), init: () => null,
-  apply: (state, event) => event.type === 'mathmodel/capabilities-confirmed' ? snapshotSchema.parse(event.data)
-    : event.type === 'mathmodel/capabilities-blocked' && state ? { ...state, blockedReason: String(event.data.reason) }
-    : event.type === 'mathmodel/capabilities-restored' && state ? { ...state, blockedReason: undefined } : state,
-  wire: { viewSchema: snapshotSchema.nullable(), view: state => state }, stateVersion: 1,
+  apply: (state, event) => mathmodelRecordType(event) === 'mathmodel/capabilities-confirmed' ? snapshotSchema.parse(event.data)
+    : mathmodelRecordType(event) === 'mathmodel/capabilities-blocked' && state ? { ...state, blockedReason: String(event.data.reason) }
+    : mathmodelRecordType(event) === 'mathmodel/capabilities-restored' && state ? { ...state, blockedReason: undefined } : state,
+  wire: { viewSchema: snapshotSchema.nullable(), view: state => state }, stateVersion: 2,
 };
 
 export function hostInventory(bundles, plugins, globalNames = [], mcpEntries = []) {
@@ -63,8 +64,8 @@ export function hostInventory(bundles, plugins, globalNames = [], mcpEntries = [
 }
 
 export class HostCapabilityController {
-  constructor({ manager, agents, projections, presets, tools, gate, readConfiguration }) {
-    Object.assign(this, { manager, agents, projections, presets, tools, gate, readConfiguration });
+  constructor({ manager, agents, subagents, projections, presets, tools, gate, readConfiguration }) {
+    Object.assign(this, { manager, agents, subagents, projections, presets, tools, gate, readConfiguration });
   }
   agent(sessionId) {
     const agent = this.agents.get(sessionId);
@@ -75,7 +76,7 @@ export class HostCapabilityController {
   async current() {
     const [bundles, plugins, configuration] = await Promise.all([this.manager.listBundles(), this.manager.listPlugins(), this.readConfiguration()]);
     if (!Array.isArray(bundles) || !Array.isArray(plugins)) throw new Error('Host inventory shape is unsupported');
-    const globalSchemas = this.tools.wireSchemas().schemas;
+    const globalSchemas = (this.tools.wireSchemas?.().schemas ?? this.tools.schemas());
     const inventory = hostInventory(bundles, plugins, globalSchemas.map(row => row.name));
     const fingerprint = {
       bundles: bundles.map(({ name, version, enabled, error }) => ({ name, version, enabled, error })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -121,8 +122,7 @@ export class HostCapabilityController {
   }
   async inheritChild(agent, parent) {
     if (this.projections.stateOf(agent.session, 'mathmodelCapabilities')) return;
-    if (!parent || this.agents.get(parent.id) !== parent || agent.session.header.origin !== 'subagent'
-      || agent.session.header.parentSession !== parent.id || !this.agents.isOwnedBy(agent.id, parent)) return;
+    if (!isDirectChild(this.agents, this.subagents, agent, parent)) return;
     const preset = this.projections.stateOf(parent.session, 'agentPreset');
     const snapshot = this.projections.stateOf(parent.session, 'mathmodelCapabilities');
     if (!snapshot || snapshot.preset !== preset || agent.session.header.agentPreset !== preset
@@ -147,11 +147,11 @@ export async function hostConfiguration(ctx, readScope) {
   // Declarative default/bundle configuration is not always repeated in the user's patch.
   // Hash the resolved values without storing or returning configuration/credentials.
   const resolved = live.map(row => ({ id: row.id, name: row.options.name,
-    config: JSON.parse(JSON.stringify(row.fiber.config ?? row.options.config ?? {})) })).sort((a, b) => a.id.localeCompare(b.id));
+    config: JSON.parse(JSON.stringify(row.fiber.effectiveConfig ?? row.fiber.config ?? row.options.config ?? {})) })).sort((a, b) => a.id.localeCompare(b.id));
   const manifest = JSON.parse(await readFile(join(profile.dir, 'package.json'), 'utf8'));
   const config = { patch: pick(doc.toJS()), resolved, manifest: { dependencies: manifest.dependencies, profile: manifest.dsh?.profile }, fusion: null };
-  const fusion = live.find(row => row.options?.name === 'dsh-model-fusion' && row.fiber?.config);
-  const database = fusion?.fiber?.config?.databasePath;
+  const fusion = live.find(row => row.options?.name === 'dsh-model-fusion' && (row.fiber?.effectiveConfig ?? row.fiber?.config));
+  const database = (fusion?.fiber?.effectiveConfig ?? fusion?.fiber?.config)?.databasePath;
   if (database) {
     if (!isAbsolute(database)) throw new Error('Fusion database path cannot be verified');
     if (existsSync(database)) {
@@ -176,11 +176,11 @@ export class MathmodelHostCapabilitiesGateway extends TypertRemoteService {
   async describeTools(sessionId) {
     const agent = this.controller.agent(sessionId);
     const view = this.taskTools.describe(sessionId);
-    const schemas = this.hostContext.tools.wireSchemas().schemas;
+    const schemas = (this.hostContext.tools.wireSchemas?.().schemas ?? this.hostContext.tools.schemas());
     const plugins = await this.hostContext.pluginManager.listPlugins();
     const mcpEntries = [...this.hostContext.loader.entries()].flatMap(row => {
       if (!/dsh-mcp-client/i.test(row.options?.name ?? '')) return [];
-      const config = row.fiber?.config ?? row.options?.config;
+      const config = row.fiber?.effectiveConfig ?? row.fiber?.config ?? row.options?.config;
       if (typeof config?.serverName !== 'string') return [];
       const entryId = plugins.find(plugin => plugin.entryId === row.id || plugin.entryId === `include:${row.id}`)?.entryId ?? row.id;
       return [{ entryId, serverName: config.serverName }];
@@ -195,7 +195,7 @@ export class MathmodelHostCapabilitiesGateway extends TypertRemoteService {
     return { ...view, inventory, model, modelGroups: catalog.groups,
       permissionPreset: this.hostContext.get('permissionPresets')?.current(agent.session),
       skillToolAvailable: agent.ctx.tools.get('skill', agent) !== undefined,
-      toolCount: agent.ctx.tools.wireSchemas(agent).schemas.length };
+      toolCount: agent.ctx.tools.schemas(agent).length };
   }
   async setTools(sessionId, selection) {
     this.taskTools.set(sessionId, selection);
@@ -211,15 +211,15 @@ export class MathmodelHostCapabilitiesGateway extends TypertRemoteService {
 }
 
 export function installHostCapabilities(ctx) {
-  ctx.inject(['pluginManager', 'agents', 'sessionProjections', 'agentPresets', 'tools', 'loader', 'profileContext', 'sessionController', 'permissionPresets'], scope => {
+  ctx.inject(['pluginManager', 'agents', 'sessionProjections', 'agentPresets', 'tools', 'loader', 'profileContext', 'sessionController', 'permissionPresets', 'subagents'], scope => {
     const gate = new HostMutationGate();
-    const controller = new HostCapabilityController({ manager: scope.pluginManager, agents: scope.agents,
+    const controller = new HostCapabilityController({ manager: scope.pluginManager, agents: scope.agents, subagents: scope.subagents,
       projections: scope.sessionProjections, presets: scope.agentPresets, tools: scope.tools, gate,
       readConfiguration: () => hostConfiguration(scope) });
     scope.sessionProjections.register(capabilityProjection);
     scope.sessionProjections.register(taskToolSwitchProjection);
     scope.sessionProjections.register(taskToolWireProjection);
-    const taskTools = new TaskToolSwitchController({ agents: scope.agents, projections: scope.sessionProjections });
+    const taskTools = new TaskToolSwitchController({ agents: scope.agents, subagents: scope.subagents, projections: scope.sessionProjections });
     for (const agent of scope.agents.list()) taskTools.attach(agent, scope);
     scope.effect(() => () => taskTools.dispose(), 'mathmodel: task tool switches');
     const manager = scope.pluginManager[symbols.original] ?? scope.pluginManager;
@@ -233,6 +233,8 @@ export function installHostCapabilities(ctx) {
       scope.emit('mathmodel/capabilities-blocked', agent.id, reason);
     };
     scope.on('agent/pre-step', async (payload, next) => {
+      const parent = scope.agents.get(payload.agent.session.header.parentSession);
+      await gate.read(() => controller.inheritChild(payload.agent, parent));
       const reason = await gate.read(() => controller.verify(payload.agent));
       if (reason) { refuse(payload.agent, reason); return { kind: 'reject' }; }
       if (scope.sessionProjections.stateOf(payload.agent.session, 'mathmodelCapabilities')?.blockedReason) appendCapabilityEvent(payload.agent.session, 'mathmodel/capabilities-restored', {});

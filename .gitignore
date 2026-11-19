@@ -20,6 +20,10 @@ resources/
 plugins/*/lib/
 !plugins/dsh-model-fusion/lib/
 !plugins/dsh-model-fusion/lib/**
+!plugins/dsh-agent-teams/lib/
+!plugins/dsh-agent-teams/lib/**
+!plugins/dsh-context/lib/
+!plugins/dsh-context/lib/**
 plugins/*/node_modules/
 plugins/*/dist/
 *.log

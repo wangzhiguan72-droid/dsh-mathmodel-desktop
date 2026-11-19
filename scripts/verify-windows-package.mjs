@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { SEED_MARKER, WEB_FAMILY_ROWS_0411, activeWebFamilyRows } = require('../src/runtime.cjs');
+const { SEED_MARKER, WEB_FAMILY_ROWS_0411, WEB_FAMILY_ROWS_0419, activeWebFamilyRows } = require('../src/runtime.cjs');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const release = path.resolve(process.argv[2] ?? path.join(repo, 'dist/win-unpacked'));
 if (process.platform !== 'win32') throw new Error('This packaged-app check requires Windows.');
@@ -237,7 +237,7 @@ async function start(appDir, phase) {
   const webFamilyVersion = JSON.parse(fs.readFileSync(path.join(appDir, 'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/package.json'), 'utf8')).version;
   const hostClient = await createInstalledHostClient({ logFile });
   let children;
-  if (['0.4.11', '0.4.12'].includes(webFamilyVersion)) {
+  if (['0.4.11', '0.4.12', '0.4.19'].includes(webFamilyVersion)) {
     // 0.4.11 removed /rows; the plugin manager inventory is the family ledger.
     children = activeWebFamilyRows(await hostClient.rpc('pluginManager', 'listPlugins'));
     assert.ok(children, 'Plugin manager inventory is unreadable');
@@ -281,7 +281,7 @@ async function start(appDir, phase) {
   if (fs.existsSync(path.join(appDir, 'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/package.json'))) {
     assert.ok(allPlugins.some(row => row.moduleName === '@wxg-prc-cpg/browser-skill-dsh-plugin' && row.enabled && row.fiberPhase === 'active'), 'BrowserSkill plugin is not active');
   }
-  const expectedRows = ['0.4.11', '0.4.12'].includes(webFamilyVersion)
+  const expectedRows = webFamilyVersion === '0.4.19' ? [...WEB_FAMILY_ROWS_0419, '@linxin666/dsh-liangshen'] : ['0.4.11', '0.4.12', '0.4.19'].includes(webFamilyVersion)
     // Fresh 0.4.11 defaults: every row active except the opt-in ssh and skill-explorer.
     ? [...WEB_FAMILY_ROWS_0411, '@linxin666/dsh-liangshen']
     : [

@@ -4,5 +4,5 @@ export declare function loadPromptBundle(dir?: string): PromptBundle;
 export declare function loadModelPromptBundle(dir?: string): PromptBundle;
 export declare function promptManifest(dir?: string): {
     prompts: PromptBundle;
-    digests: Readonly<Record<"lead" | "worker" | "compact", import("./contracts.js").Digest>>;
+    digests: Readonly<Record<"compact" | "lead" | "worker", import("./contracts.js").Digest>>;
 };

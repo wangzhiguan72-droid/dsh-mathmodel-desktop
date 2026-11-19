@@ -16,6 +16,11 @@
   name: '@deepseek-ai/dsh-session-telemetry-otel'
   disabled: true
 
+# Preserve the local choice against raw session uploads on the new kernel.
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+  disabled: true
+
 # Claude Code 钩子桥：跑你现有 hooks.json 里的 command 钩子子集。
 # 可阻塞提示词/工具、附加上下文、强制继续；http / mcp_tool / prompt / agent
 # 四类 handler 会被跳过。通过所选 DSH_HOME 解析绝对路径，避免固定到构建者账户。

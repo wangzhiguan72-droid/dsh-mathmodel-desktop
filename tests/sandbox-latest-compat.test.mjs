@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const root = path.resolve(import.meta.dirname, '..');
 const plugin = path.join(root, 'plugins/dsh-auto-mode');
 const hostModules = path.join(root, 'runtime/host/node_modules');
-const version = '0.2.1-rc.5';
+const version = JSON.parse(fs.readFileSync(path.join(root, 'runtime/host/package.json'))).dependencies['@deepseek-ai/dsh'];
 
 test('sandbox auto declares the exact installed kernel cohort', () => {
   const compatibility = JSON.parse(fs.readFileSync(path.join(plugin, 'compatibility.json')));
@@ -32,7 +32,7 @@ test('latest host retains the permission, tool guard, and current-directory seam
   assert.equal(typeof PermissionPresetService.prototype.current, 'function');
   assert.equal(typeof WorkingDirectoryService.prototype.get, 'function');
   assert.equal(typeof WorkingDirectoryService.prototype.ensure, 'function');
-  const source = fs.readFileSync(path.join(hostModules, '@deepseek-ai/dsh-tools/lib/index.js'), 'utf8');
+  const source = fs.readFileSync(path.join(hostModules, '@deepseek-ai/dsh-tools/lib/pipeline.js'), 'utf8');
   assert.match(source, /"tools\/pre-execute"/);
   assert.match(source, /"tools\/post-execute"/);
   assert.match(source, /"tools\/result"/);

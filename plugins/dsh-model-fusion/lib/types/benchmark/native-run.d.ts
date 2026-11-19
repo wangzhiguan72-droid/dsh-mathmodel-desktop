@@ -29,25 +29,9 @@ export interface NativeBenchmarkOptions {
  * this function does not implement another LLM/tool loop or grade candidate code.
  */
 export declare function runNativeBenchmark(ctx: Context, options: NativeBenchmarkOptions): Promise<{
-    status: string;
-    failure: string | null;
-    endReason: import("@deepseek-ai/dsh-session").TurnEndReason | null;
-    phases: {
-        stage: "implementation" | "self_review";
-        completed: boolean;
-        nativeRequests: number;
-        endReason: unknown;
-    }[];
-    deliveredSnapshot: import("../host/workspace.js").WorkspaceSnapshot;
-    fusionState: import("../index.js").TaskState | null;
-    usage: NativeUsageRecord[];
-    actualBilledUsd: null;
-    apiEquivalentUsd: null;
-    upstreamHttpCalls: null;
-    naiveDelegations?: import("./naive.js").NaiveDelegation[] | undefined;
     schemaVersion: number;
     runId: string;
-    variant: "lead_only" | "worker_only" | "worker_selfreview" | "naive" | "fusion";
+    variant: "fusion" | "lead_only" | "naive" | "worker_only" | "worker_selfreview";
     dataKind: "real" | "synthetic";
     startedAt: string;
     endedAt: string;
@@ -64,5 +48,21 @@ export declare function runNativeBenchmark(ctx: Context, options: NativeBenchmar
         parentSessionId: SessionId | undefined;
         eventsFile: string;
     }[];
+    naiveDelegations?: import("./naive.js").NaiveDelegation[] | undefined;
+    status: string;
+    failure: string | null;
+    endReason: import("@deepseek-ai/dsh-session").TurnEndReason | null;
+    phases: {
+        stage: 'implementation' | 'self_review';
+        completed: boolean;
+        nativeRequests: number;
+        endReason: unknown;
+    }[];
+    deliveredSnapshot: import("../host/workspace.js").WorkspaceSnapshot;
+    fusionState: import("../index.js").TaskState | null;
+    usage: NativeUsageRecord[];
+    actualBilledUsd: null;
+    apiEquivalentUsd: null;
+    upstreamHttpCalls: null;
 }>;
 export { NativeRequestBudget };

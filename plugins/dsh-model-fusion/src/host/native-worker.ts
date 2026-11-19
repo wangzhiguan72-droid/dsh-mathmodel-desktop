@@ -5,7 +5,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type { PhysicalRoute } from '../contracts.js'
-import { requireSubagentMethod } from './subagent-seam.js'
+import { requireSubagentMethod, hasSubagentTree } from './subagent-seam.js'
 
 export interface NativeWorkerRequest {
   readonly childId: string
@@ -36,6 +36,8 @@ interface WorkerStartRequest {
 interface StartedWorker {
   readonly childId: string
   readonly messageId?: MessageId
+  readonly result?: Promise<unknown>
+  dispose?(): void | Promise<void>
 }
 
 /** Structural view of the two DSH subagent seams. Only the branch that exists is called. */
@@ -45,8 +47,12 @@ interface SubagentSeam {
     readonly label: string
     readonly childId: ReturnType<typeof SessionId>
     readonly delivery: 'parent'
-    readonly request: WorkerStartRequest
+    readonly request?: WorkerStartRequest
     readonly signal: AbortSignal
+    readonly parent?: Agent
+    readonly prompt?: WorkerStartRequest['prompt']
+    readonly agentOptions?: WorkerStartRequest['agentOptions']
+    readonly maxDepth?: number
   }): Promise<StartedWorker>
   startContinuable?(spec: {
     readonly provider: string
@@ -62,6 +68,7 @@ interface SubagentSeam {
 /** Version-pinned public API adapter. It never calls an LLM adapter or runs a shell itself. */
 export class NativeWorkerTransport {
   readonly #flushed = new WeakMap<Agent, number>()
+  readonly #activations = new Map<string, { parent: Agent; activation: StartedWorker }>()
   constructor(private readonly ctx: Context, private readonly provider = 'spawn') {}
 
   assertAvailable(): void {
@@ -95,13 +102,18 @@ export class NativeWorkerTransport {
     const accepted = start === 'startActivation'
       ? await subagents.startActivation!({
         provider: this.provider, label: request.label, childId, delivery: 'parent',
-        request: { parent, prompt, agentOptions, maxDepth }, signal,
+        ...(hasSubagentTree(this.ctx.subagents) ? { parent, prompt, agentOptions, maxDepth } : { request: { parent, prompt, agentOptions, maxDepth } }), signal,
       })
       : await subagents.startContinuable!({
         provider: this.provider, label: request.label, childId,
         request: { parent, prompt, persona: request.persona, agentOptions, toolFilter: { allow: [...request.allowedTools] }, maxDepth },
         signal,
       })
+    if (hasSubagentTree(this.ctx.subagents)) {
+      if (typeof accepted.dispose !== 'function') throw new Error('Native activation cannot be disposed')
+      this.#activations.set(request.childId, { parent, activation: accepted })
+      void accepted.result?.catch(() => undefined)
+    }
     if (accepted.childId !== request.childId) throw new Error('Native Worker identity changed during creation')
     if (!accepted.messageId) throw new Error('Native Worker start did not accept an initial message')
     return { childId: accepted.childId, messageId: accepted.messageId }
@@ -159,7 +171,7 @@ export class NativeWorkerTransport {
       }
       await child.whenIdle()
       if (interruptError) throw interruptError
-      if (this.ctx.agents.get(child.id) !== child) throw new Error('Worker residency changed; quiescence requires reconciliation')
+      if (this.ctx.agents.get(child.id) !== child && this.ctx.agents.get(child.id) !== undefined) throw new Error('Worker residency changed; quiescence requires reconciliation')
       await this.#flushSettled(child)
       return child
     } finally { removeSteering(); signal.removeEventListener('abort', interrupt) }
@@ -197,6 +209,15 @@ export class NativeWorkerTransport {
     const child = this.ctx.agents.get(SessionId(childId))
     if (child && child.session.header.parentSession !== parent.id) throw new Error('Cannot release another Lead’s child')
     // 0.2.1 calls this `drainChildren`. 0.2.0 calls it `drainContinuableChildren`.
+    if (hasSubagentTree(this.ctx.subagents)) {
+      const owned = this.#activations.get(childId)
+      if (owned && owned.parent !== parent) throw new Error('Cannot release another Lead’s activation')
+      if (!owned && child) throw new Error('Missing exact Worker activation; reconciliation required')
+      if (owned) await owned.activation.dispose!()
+      if (this.ctx.agents.get(SessionId(childId))) throw new Error('Worker activation release did not prove absence')
+      this.#activations.delete(childId)
+      return
+    }
     const subagents = this.ctx.subagents as SubagentSeam
     const drain = requireSubagentMethod(subagents, 'drainChildren', 'drainContinuableChildren')
     const ids = [SessionId(childId)]

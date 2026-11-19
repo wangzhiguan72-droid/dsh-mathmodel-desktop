@@ -107,7 +107,8 @@ export async function runNativeBenchmark(ctx: Context, options: NativeBenchmarkO
   try {
     parent = (await ctx.agents.create({ sessionId: SessionId(`bench-${options.runId}-${randomUUID()}`),
       meta: { cwd: workspace }, agentOptions: { ...nativeRoute, maxTokens: outputLimits.roles[role].maxTokens } })).agent
-    installModelSelection(parent.ctx, { current: nativeRoute, assembled: undefined })
+    installModelSelection(parent.ctx)
+    parent.model.select(nativeRoute)
   } catch (error) { store.close(); throw error }
   let taskId = soloTask
   try {

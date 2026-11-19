@@ -44,17 +44,23 @@ test('update boot requires every default 0.4.5 row and allows known opt-ins', ()
 });
 
 test('update readiness waits for its own authenticated host after HTTP begins responding', async t => {
-  const server = http.createServer((_request, response) => { response.end('loading'); });
+  let requests = 0;
+  const announcement = new AbortController();
+  const server = http.createServer((_request, response) => { requests++; response.end('loading'); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const port = server.address().port;
   let tokenUrl = null, settled = false;
-  const ready = waitForGui(port, { deadlineMs: 5000, isAlive: () => true, getTokenUrl: () => tokenUrl })
+  const ready = waitForGui(port, { deadlineMs: 5000, isAlive: () => true, getTokenUrl: () => tokenUrl,
+    announcement: announcement.signal })
     .then(value => { settled = true; return value; });
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(settled, false, 'HTTP readiness cannot acknowledge an update');
+  assert.equal(requests, 0, 'only probe the index once the loader has settled');
   tokenUrl = `http://127.0.0.1:${port}/?token=own-host`;
+  announcement.abort();
   assert.equal(await ready, tokenUrl);
+  assert.equal(requests, 1);
   await assert.rejects(waitForGui(port, { deadlineMs: 5000, isAlive: () => true,
     getTokenUrl: () => 'http://127.0.0.1:1/?token=foreign-host' }), /unexpected GUI endpoint/);
   await assert.rejects(waitForGui(port, { deadlineMs: 25, isAlive: () => true,

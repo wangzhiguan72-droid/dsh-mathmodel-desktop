@@ -20,7 +20,7 @@ test('managed preset pre-step rejects when the Host capability service is absent
     .replace("'@deepseek-ai/dsh-scope'", JSON.stringify(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-scope')).href));
   const capabilities = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const root = new Context();
-  await root.plugin(SystemPrompt, {}); await root.plugin(ToolRuntime, { mode: 'native' });
+  await root.plugin(SystemPrompt, {}); await root.plugin(ToolRuntime, {});
   let ctx; await root.plugin({ inject: ['tools'], apply: value => { ctx = value; } });
   const scope = createScope(ctx, { id: 'managed-without-guard' });
   let entered = 0;
@@ -68,11 +68,16 @@ async function runtimeFixture() {
   ]);
   const root = new Context();
   await root.plugin(SystemPrompt, {});
-  await root.plugin(ToolRuntime, { mode: 'native' });
+  await root.plugin(ToolRuntime, {});
+  const {Session}=await framework('@deepseek-ai/dsh-session'); const {SessionProjectionRegistry}=await framework('@deepseek-ai/dsh-session-projection');
+  root.provide('sessions',{list:()=>[]}); await root.plugin(SessionProjectionRegistry, {});
   await root.plugin(ApprovalService, { policy: 'ask' });
+  const native=await framework('@deepseek-ai/dsh-tool-executor-native'); await root.plugin(native, {});
   let ctx;
   await root.plugin({ inject: ['tools', 'approval'], apply: child => { ctx = child; } });
-  const agent = { id: 'permission-negative-agent', session: sessionFixture() };
+  const session=Session.create('permission-negative-agent'); session.append('turn/start',{turn:1});
+  Object.defineProperty(session,'events',{get:()=>session.snapshotEvents()});
+  const agent = { id: 'permission-negative-agent', session };
   const scope = createScope(ctx, agent);
   agent.ctx = scope.ctx;
   return { root, ctx, agent, scope };
@@ -114,10 +119,11 @@ test('real SDK approval and tool pipeline deny rejected, cancelled, unavailable,
             return { ok: true };
           },
         });
-        const result = await fixture.ctx.tools.execute({
-          callId: `negative-${scenario.name}`, name: 'sentinel_write', arguments: {},
+        const batch = await fixture.ctx.tools.execute({
+          calls: [{type:'tool-call',id: `negative-${scenario.name}`,name:'sentinel_write',arguments:'{}'}],
           agent: fixture.agent, signal: new AbortController().signal,
         });
+        const result=batch.results[0].result;
         assert.equal(result.isError, true);
         assert.equal(bodyCalls, 0);
         assert.equal(paidCalls, 0);
@@ -154,10 +160,10 @@ test('real SDK allowed-once positive control dispatches the exact requested tool
       execute: async () => { bodyCalls += 1; writeFileSync(sentinel, 'granted'); return { ok: true }; },
     });
     const result = await fixture.ctx.tools.execute({
-      callId: 'positive-control', name: 'sentinel_write', arguments: {},
+      calls: [{type:'tool-call',id: 'positive-control',name:'sentinel_write',arguments:'{}'}],
       agent: fixture.agent, signal: new AbortController().signal,
     });
-    assert.equal(result.isError, false);
+    assert.equal(Boolean(result.isError), false);
     assert.equal(bodyCalls, 1);
     assert.equal(existsSync(sentinel), true);
     assert.equal(fixture.agent.session.events.at(-1).data.outcome, 'allowed-once');

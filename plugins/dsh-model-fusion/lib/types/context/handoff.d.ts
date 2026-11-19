@@ -7,7 +7,7 @@ export declare const HANDOFF_CONTENT_BYTES = 40000;
 export declare function recentHandoffSuffix<T extends {
     readonly content: string;
 }>(records: readonly T[]): {
-    policy: "recent-whole-records-utf8-v1";
+    policy: 'recent-whole-records-utf8-v1';
     contentByteBudget: number;
     totalRecords: number;
     omittedRecords: number;

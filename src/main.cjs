@@ -70,6 +70,7 @@ let quitting = false;
 let logStream = null;
 /** URL printed by the host (with the per-process token), set once seen. */
 let tokenUrl = null;
+let hostAnnouncement;
 let updateController = null;
 /** Ring buffer of recent host output for the error page. */
 const logTail = [];
@@ -86,7 +87,10 @@ function logFilePath() {
 function pushLogLine(line) {
   // Parse the original host line before adding timing to our own desktop logs.
   const url = parseTokenUrlLine(line);
-  if (url !== undefined) tokenUrl = url;
+  if (url !== undefined) {
+    tokenUrl = url;
+    hostAnnouncement?.abort();
+  }
   const output = startupTiming.annotate(line);
   logTail.push(output);
   if (logTail.length > LOG_TAIL_LINES) logTail.shift();
@@ -329,6 +333,8 @@ async function boot() {
   const port = await findHostPort();
   pushLogLine('[desktop] spawning the desktop host on 127.0.0.1:' + port
     + ' (the user\u2019s own dsh web defaults 3080/3081 are never taken)');
+  tokenUrl = null;
+  hostAnnouncement = new AbortController();
   hostChild = startHost(runtime, home, port, profileName);
   pushLogLine('[desktop] host pid: ' + hostChild.pid);
   const child = hostChild;
@@ -344,6 +350,7 @@ async function boot() {
   await waitForGui(port, { deadlineMs: pendingUpdate ? 15 * 60 * 1000 : READY_TIMEOUT_MS,
     isAlive: () => !exited,
     getTokenUrl: () => tokenUrl,
+    announcement: hostAnnouncement.signal,
   });
   pushLogLine(startupTiming.stage('host-ready'));
   const target = tokenUrl;
@@ -365,7 +372,7 @@ async function boot() {
     if (!Array.isArray(health.degraded) || health.degraded.length) throw new Error('Updated host has degraded plugins');
     const familyVersion = /^@linxin666\/dsh-web-all@([^\s]+)$/.exec(stamp?.webAll ?? '')?.[1];
     let family = {};
-    if (['0.4.11', '0.4.12'].includes(familyVersion)) {
+    if (['0.4.11', '0.4.12', '0.4.19'].includes(familyVersion)) {
       // 0.4.11 removed /rows; read the active family rows from the plugin manager.
       const rpcId = crypto.randomUUID();
       const response = await fetch(new URL('/api/pluginManager/listPlugins', target), {

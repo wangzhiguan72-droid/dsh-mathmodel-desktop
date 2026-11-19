@@ -106,17 +106,13 @@ export declare function cacheView(policy: CachePolicy, pair?: {
     role: Role | undefined;
     mode: CacheMode;
     intervalSeconds: number;
-    modeSource: "user" | "role" | "route" | "family" | "generic" | "pair";
-    intervalSource: "user" | "route" | "family" | "generic" | "learned";
+    modeSource: "family" | "generic" | "pair" | "role" | "route" | "user";
+    intervalSource: "family" | "generic" | "learned" | "route" | "user";
     setting: ModelCacheSetting;
     defaults: {
-        route?: {
-            label: string;
-            reason: {
-                zh: string;
-                en: string;
-            };
-        } | undefined;
+        mode: CacheMode;
+        intervalSeconds: number;
+        source: "family" | "generic" | "route";
         family?: {
             label: string;
             lifetime: {
@@ -126,9 +122,13 @@ export declare function cacheView(policy: CachePolicy, pair?: {
             discount: string;
             docs: string;
         } | undefined;
-        mode: CacheMode;
-        intervalSeconds: number;
-        source: "route" | "family" | "generic";
+        route?: {
+            label: string;
+            reason: {
+                zh: string;
+                en: string;
+            };
+        } | undefined;
     };
     totals: {
         /** Real requests after a wait of at least WAIT_SECONDS, and how many still found their prefix cached. */

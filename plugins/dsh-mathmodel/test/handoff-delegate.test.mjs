@@ -103,10 +103,10 @@ test('运行中的子代理被守卫约束，结束后解除', async () => {
   const { root, fake, call } = setup();
   const p = call('delegate', brief('explore'));
   await tick();
-  assert.match(root.tools.guardReason({ agent: { id: 'id-1' }, name: 'write', arguments: { file_path: 'x' } }), /只读/);
+  assert.match(root.tools.checkGuards({ agent: { id: 'id-1' }, name: 'write', arguments: { file_path: 'x' } })?.reason, /只读/);
   fake.resolve({ structured: receipt(), stopReason: 'end_turn' });
   await p;
-  assert.equal(root.tools.guardReason({ agent: { id: 'id-1' }, name: 'write', arguments: { file_path: 'x' } }), undefined);
+  assert.equal(root.tools.checkGuards({ agent: { id: 'id-1' }, name: 'write', arguments: { file_path: 'x' } })?.reason, undefined);
 });
 
 test('子代理失败也释放写锁并写 end 行', async () => {
@@ -212,4 +212,20 @@ test('启动期间已中止的调用，拿到 activation 后立即 dispose', { t
   const { root } = setup({}, async spec => { ac.abort(); return { childId: spec.childId, result: new Promise((_, reject) => { settle = reject; }), dispose: () => { disposed++; settle(new Error('aborted')); } }; });
   await root.tools.get('delegate').execute(brief('explore'), { agent: { id: 'p1' }, signal: ac.signal }).catch(() => {});
   assert.equal(disposed, 1);
+});
+
+
+test('0.2.2 tree interface receives flat reserved activation input', async () => {
+ const {root,fake,call}=setup(); root.subagents.rootOf=()=>{};
+ const pending=call('delegate',brief('explore'));await tick();const spec=fake.started[0];
+ assert.equal(spec.request,undefined);assert.equal(spec.parent.id,'p1');assert.equal(spec.childId,'id-1');assert.equal(spec.delivery,'caller');assert.equal(spec.maxDepth,1);assert.ok(spec.outputSchema);assert.ok(spec.prompt.length);
+ fake.resolve({structured:receipt(),stopReason:'completed'});assert.equal((await pending).status,'done');
+});
+
+test('cancelled tree activation retains write guard until asynchronous disposal finishes', async () => {
+ let finishResult,finishDisposal; const disposed=new Promise(resolve=>{finishDisposal=resolve});let disposalCalls=0;
+ const {root,call}=setup({},async spec=>({childId:spec.childId,result:new Promise(resolve=>{finishResult=resolve}),dispose(){disposalCalls++;return disposed}}));root.subagents.rootOf=()=>{};
+ const abort=new AbortController();const pending=call('delegate',brief('implement',['src/delayed.js']),abort.signal);await tick();abort.abort();await tick();
+ finishResult({stopReason:'aborted'});await tick();assert.equal(disposalCalls,1);assert.ok(children.has('id-1'));assert.equal(writeLocks.acquire('other',['src/delayed.js'],'D:/r').ok,false);
+ finishDisposal();assert.equal((await pending).status,'blocked');assert.equal(children.has('id-1'),false);assert.equal(writeLocks.acquire('other',['src/delayed.js'],'D:/r').ok,true);writeLocks.release('other');
 });

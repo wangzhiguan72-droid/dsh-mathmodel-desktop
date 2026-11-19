@@ -67,7 +67,7 @@ if (bridge) {
   }
 }
 if (!bridge) {
-  if (['0.1.6', '0.1.7', '0.1.8', '0.1.9', '0.2.0'].includes(desktop.version)) {
+  if (['0.1.6', '0.1.7', '0.1.8', '0.1.9', '0.2.0', '0.2.2-rc.3'].includes(desktop.version)) {
     for (const relative of [
       'resources/runtime/profile-web/node_modules/dsh-model-fusion/lib/client.js',
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/package.json',
@@ -75,7 +75,7 @@ if (!bridge) {
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/lib/client.js',
       'resources/runtime/profile-web/node_modules/@nanmicoder/dsh-auto-mode/cordis.patch.yml',
     ]) { required.push(relative); compareFromZip.push(relative); }
-    if (['0.2.0'].includes(desktop.version)) {
+    if (['0.2.0', '0.2.2-rc.3'].includes(desktop.version)) {
       for (const relative of [
         'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/package.json',
         'resources/runtime/profile-web/node_modules/@wxg-prc-cpg/browser-skill-dsh-plugin/lib/index.mjs',
@@ -253,11 +253,11 @@ async function main() {
     const seededRows = yaml.parse(patch, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }] });
     assert.equal(seededRows.flatMap(row => row.insert ?? []).filter(row => row.id === 'dsh-model-fusion').length, 0, 'Fusion has a second manual loader');
     assert.equal(seededRows.filter(row => row.id === 'dsh-model-fusion' && row.name === 'dsh-model-fusion').length, 1, 'Fusion config override missing');
-    assert.equal(JSON.parse(fs.readFileSync(file(unpacked, 'resources/runtime/profile-web/node_modules/dsh-model-fusion/package.json'), 'utf8')).version, '0.2.8');
+    assert.equal(JSON.parse(fs.readFileSync(file(unpacked, 'resources/runtime/profile-web/node_modules/dsh-model-fusion/package.json'), 'utf8')).version, '0.2.11+mathmodel.2');
     const webAllClient = fs.readFileSync(file(unpacked,
       'resources/runtime/profile-web/node_modules/@linxin666/dsh-web-all/lib/client.js'), 'utf8');
     // From 0.4.11 the aggregate no longer embeds the terminal; dsh-ssh carries the only copy.
-    if (!['0.4.11', '0.4.12'].includes(expectedWeb)) assert.ok(webAllClient.includes('window.open(t, "_blank", "noopener,noreferrer");'),
+    if (!['0.4.11', '0.4.12', '0.4.19'].includes(expectedWeb)) assert.ok(webAllClient.includes('window.open(t, "_blank", "noopener,noreferrer");'),
       'Packaged dsh-web-all does not use the desktop-safe xterm link handler');
     assert.ok(!/const e = window\.open\(\);\s*if \(e\) \{\s*try \{\s*e\.opener = null;/.test(webAllClient),
       'Packaged dsh-web-all still uses the empty xterm popup flow');

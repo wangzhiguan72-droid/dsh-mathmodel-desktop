@@ -6,6 +6,6 @@
  * and probes use {@link nativeShellTool} — the tool that actually exists.
  */
 export declare const nativeShellTool: 'bash' | 'pwsh';
-export declare const isShellTool: (name: string) => name is "bash" | "pwsh";
+export declare const isShellTool: (name: string) => name is 'bash' | 'pwsh';
 /** Command text the prompt layer names for the platform's native shell. */
 export declare const nativeShellDescription: string;

@@ -42,12 +42,12 @@ test('generated specialized presets retain standard roster and Persona contracts
   assert.match(generated.yaml, /disabled: !!js process\.platform/);
 });
 
-test('known rc.2 managed block upgrades to the bundled roster and preserves Host additions', () => {
+for (const version of ['rc2', 'rc5']) test(`known ${version} managed block upgrades to the bundled roster and preserves Host additions`, () => {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-presets-upgrade-'));
   try {
     const profile = join(directory, 'cordis.patch.yml');
     const before = '# Personal note\n- insert:\n    - id: custom-plugin\n      name: example\n\n';
-    const oldBlock = readFileSync(join(root, 'tests', 'fixtures', 'specialized-rc2-managed.yaml'), 'utf8')
+    const oldBlock = readFileSync(join(root, 'tests', 'fixtures', `specialized-${version}-managed.yaml`), 'utf8')
       .replace('facts, assumptions', 'facts,\n                assumptions')
       .replace('# END DSH specialized presets', '- id: mathmodel\n  name: "@deepseek-harness/dsh-mathmodel"\n  config:\n    imageConnections: []\n\n# END DSH specialized presets');
     const after = '\n# Personal trailing note\n';
@@ -75,11 +75,11 @@ test('known rc.2 managed block upgrades to the bundled roster and preserves Host
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('edited rc.2 managed block is rejected without a write or backup', () => {
+for (const version of ['rc2', 'rc5']) test(`edited ${version} managed block is rejected without a write or backup`, () => {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-presets-upgrade-edit-'));
   try {
     const profile = join(directory, 'cordis.patch.yml');
-    const original = readFileSync(join(root, 'tests', 'fixtures', 'specialized-rc2-managed.yaml'), 'utf8')
+    const original = readFileSync(join(root, 'tests', 'fixtures', `specialized-${version}-managed.yaml`), 'utf8')
       .replace('Never fabricate data, citations', 'Fabricate data, citations');
     writeFileSync(profile, original);
     assert.throws(() => restoreSpecializedPresets({ runtimeRoot, profilePatch: profile, apply: true }), /Managed preset block differs/);

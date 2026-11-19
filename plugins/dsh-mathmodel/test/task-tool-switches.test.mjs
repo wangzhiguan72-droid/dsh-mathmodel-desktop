@@ -29,7 +29,7 @@ test('switches remove model schemas only for one Agent and cover late tools', as
   t.after(() => switcher.dispose());
   assert.deepEqual(root.tools.schemas(a).map(row => row.name), ['read_file']);
   assert.equal(root.tools.schemas(b).length, definitions.length);
-  assert.match(root.tools.guardReason({ agent: a, name: 'skill' }), /关闭/);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'skill' })?.reason, /关闭/);
   const late = root.tools.register(tool('mcp__academic-search__lookup_mesh'));
   t.after(late);
   assert.equal(root.tools.get('mcp__academic-search__lookup_mesh', a), undefined);
@@ -37,11 +37,11 @@ test('switches remove model schemas only for one Agent and cover late tools', as
   const shadow = first.ctx.tools.register(tool('mcp__academic-search__search_papers'));
   t.after(shadow);
   assert.ok(root.tools.get('mcp__academic-search__search_papers', a), 'own-scope shadow stays visible under native restrictions');
-  assert.match(root.tools.guardReason({ agent: a, name: 'mcp__academic-search__search_papers' }), /关闭/);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'mcp__academic-search__search_papers' })?.reason, /关闭/);
   selected = { skills: true, mcp: true, taskBoard: true, disabledMcpServers: ['academic-search'] };
   switcher.refresh();
   assert.ok(root.tools.get('skill', a));
-  assert.match(root.tools.guardReason({ agent: a, name: 'mcp__academic-search__search_papers' }), /关闭/);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'mcp__academic-search__search_papers' })?.reason, /关闭/);
   selected.disabledMcpServers = [];
   switcher.refresh();
   assert.equal(root.tools.schemas(a).length, 5);
@@ -67,13 +67,13 @@ test('after the first turn, closing keeps offered schemas and only the guard blo
   apply({ type: 'turn/start', data: { turn: 1 } });
   apply(event({ mcp: false, skills: false })); switcher.refresh();
   assert.deepEqual(names(), ['read_file', 'skill'], 'closing skill after the first turn keeps its schema');
-  assert.match(root.tools.guardReason({ agent: a, name: 'skill' }), /关闭/);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'skill' })?.reason, /关闭/);
   apply(event({ mcp: true, skills: false })); switcher.refresh();
   assert.deepEqual(names(), ['mcp__academic-search__search_papers', 'read_file', 'skill'], 'reopening widens the wire');
-  assert.equal(root.tools.guardReason({ agent: a, name: 'mcp__academic-search__search_papers' }), undefined);
+  assert.equal(root.tools.checkGuards({ agent: a, name: 'mcp__academic-search__search_papers' })?.reason, undefined);
   apply(event({ mcp: true, skills: false, disabledMcpServers: ['academic-search'] })); switcher.refresh();
   assert.equal(names().length, 3, 'a later server-level close does not narrow either');
-  assert.match(root.tools.guardReason({ agent: a, name: 'mcp__academic-search__search_papers' }), /关闭/);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'mcp__academic-search__search_papers' })?.reason, /关闭/);
   const replayed = [event({ mcp: false }), { type: 'turn/start', data: { turn: 1 } }, event({ mcp: false, skills: false })]
     .reduce(taskToolWireProjection.apply, taskToolWireProjection.init());
   assert.deepEqual(replayed.selection, normalizeToolSwitches({ mcp: false }), 'resume rebuilds the same wire');
@@ -210,8 +210,8 @@ test('三个新开关：首轮前移除 schema，首轮后保留 schema 只守�
   apply({ type: 'turn/start', data: { turn: 1 } });
   apply(event({ delegate: false })); switcher.refresh();
   assert.deepEqual(names(), all, '首轮后关闭不移除 schema');
-  assert.match(root.tools.guardReason({ agent: a, name: 'delegate' }), /关闭/);
-  assert.equal(root.tools.guardReason({ agent: a, name: 'web_fetch' }), undefined);
+  assert.match(root.tools.checkGuards({ agent: a, name: 'delegate' })?.reason, /关闭/);
+  assert.equal(root.tools.checkGuards({ agent: a, name: 'web_fetch' })?.reason, undefined);
 });
 
 test('toolDenied 覆盖三个新开关，本地 read_image 不受影响', () => {

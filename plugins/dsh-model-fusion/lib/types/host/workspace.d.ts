@@ -1,5 +1,5 @@
 import { SnapshotId } from '../contracts.js';
-export declare const SNAPSHOT_EXCLUSIONS: readonly [".git", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"];
+export declare const SNAPSHOT_EXCLUSIONS: readonly ['.git', 'node_modules', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache'];
 export declare const FALLBACK_EXCLUSIONS: readonly [".git", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv", ".tox", ".nox", ".eggs", ".gradle", ".next", ".turbo", ".cache"];
 export interface WorkspaceEntry {
     path: string;

@@ -36,6 +36,13 @@ export function patchSessionExternalEvents({ runtimeRoot }) {
   if (!runtimeRoot) throw new TypeError('runtimeRoot is required');
   const target = path.join(runtimeRoot, '@deepseek-ai', 'dsh-session', 'lib', 'index.js');
   const source = fs.readFileSync(target, 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(runtimeRoot, '@deepseek-ai', 'dsh-session', 'package.json')));
+  if (manifest.version === '0.2.2-rc.3') {
+    if (!source.includes('function appendPluginRecord(') || !source.includes('function pluginRecordOf(')) {
+      throw new Error('Pinned Session v4 plugin-record API changed');
+    }
+    return { target, changed: false, nativePluginRecords: true };
+  }
   const patched = patchSessionExternalEventsSource(source);
   if (patched !== source) fs.writeFileSync(target, patched);
   return { target, changed: patched !== source };

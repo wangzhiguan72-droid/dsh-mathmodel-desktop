@@ -367,10 +367,17 @@ async function invokeCheck(input: CheckInput, check: FrozenCheck) {
   const remove = input.authorizeNested(callId)
   let result
   try {
-    result = await ctx.tools.execute({ callId, rootCallId: exec.rootCallId, parent: exec.token,
-      name: nativeShellTool, arguments: { command: check.definition.command, description: check.definition.description,
-        workdir: root, ...(input.nativeTimeout && check.definition.timeoutSeconds === undefined ? {} : { timeoutMs: (check.definition.timeoutSeconds ?? order.policy.commandMaxSeconds) * 1000 }), run_in_background: false },
-      agent: exec.agent, signal: exec.signal })
+    const args = { command: check.definition.command, description: check.definition.description,
+      workdir: root, ...(input.nativeTimeout && check.definition.timeoutSeconds === undefined ? {} : { timeoutMs: (check.definition.timeoutSeconds ?? order.policy.commandMaxSeconds) * 1000 }), run_in_background: false }
+    if (typeof ctx.tools.resolve === 'function') {
+      const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: callId, name: nativeShellTool, arguments: JSON.stringify(args) }], agent: exec.agent, signal: exec.signal })
+      const selected = batch.results.find(row => row.callId === callId)
+      if (!selected) throw new Error('Native check batch omitted its exact call result')
+      for (const context of batch.additionalContexts) exec.deferContext(context)
+      result = selected.result
+    } else {
+      result = await (ctx.tools as unknown as { execute(input: unknown): Promise<import('@deepseek-ai/dsh-tools').ToolExecutionResult> }).execute({ callId, rootCallId: exec.rootCallId, parent: exec.token, name: nativeShellTool, arguments: args, agent: exec.agent, signal: exec.signal })
+    }
   } catch (error) {
     const evidence: ToolEvidence = { ...started, state: 'outcome-unknown', endedAt: new Date().toISOString(),
       stderr: store.putArtifact(order.taskId, Buffer.from(String(error)), 'text/plain') }

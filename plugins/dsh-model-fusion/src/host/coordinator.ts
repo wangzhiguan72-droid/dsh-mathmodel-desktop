@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-compaction'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { NativeWorkerNotices } from './native-worker-notices.js'
@@ -43,7 +44,7 @@ import type { KeepaliveClock } from './native-keepalive.js'
 import { hasStartActivation } from './subagent-seam.js'
 import { NativeWorkerTransport } from './native-worker.js'
 import { NativeFusionActivity } from './native-activity.js'
-import { captureExploration, citedEvidenceChanged } from './native-exploration.js'
+import { captureExploration, citedEvidenceChanged, scopeDirectoryEmpty } from './native-exploration.js'
 import { workspaceWriterDenial } from './workspace-guard.js'
 import { absentWorkerOutcome, workerStopExplanation } from './worker-terminal.js'
 import { resolveModelOutputLimits } from './model-output.js'
@@ -173,6 +174,103 @@ interface DelegateInput {
 /** Whitespace-insensitive, otherwise exact: a requirement must be the user's own words. */
 export const normalizeQuote = (text: string) => text.replace(/\s+/g, ' ').trim()
 
+/**
+ * A follow-up that adds no new instruction. Exact quotes from the task it continues
+ * stay valid; a message that adds its own words starts a fresh quote boundary.
+ */
+const BARE_CONTINUATION = /^(?:please\s+)?(?:continue|go on|carry on|keep going|proceed|resume|cont|继续|接着做|接着来|接着|往下做|往下|请继续)[.!。！…]*$/i
+
+export function isBareContinuation(text: string): boolean {
+  return BARE_CONTINUATION.test(normalizeQuote(text))
+}
+
+/**
+ * enforced-v3: a bare no-tool turn must not close a concrete workspace request,
+ * or a reply that only promises to inspect, delegate, or implement. Asking what
+ * a word means ("what is a patch", "what does implement mean", "是什么", "如何实现")
+ * is not that request, and neither is an explanation that forbids edits.
+ * A definition clause does not waive a later command in the same sentence.
+ * A conversational answer such as "Hello." does not match either pattern.
+ */
+const IMPLEMENTATION_REQUEST = /(?:\b(?:fix|implement|refactor|patch|repair|correct)\b|\brun\b[\s\S]{0,48}\btests?\b|修复|实现|改正|重构|跑测试|运行测试|不要只(?:做)?计划|do not stop after planning)/i
+const PLANNING_REPLY = /(?:\b(?:i will|i'll|i'm going to|i am going to|let me)\b[\s\S]{0,180}\b(?:inspect|delegate|implement|fix|explore|correct|continue|look|check|read|hand(?:\s|-)?off)\b|我将|我会|接下来我会|让我(?:先)?|我先(?:去)?(?:查看|看看|看一下|检查|阅读)(?!了)|准备(?:去)?(?:检查|查看|交给|委托)|交给\s*Sidekick)/i
+const DEFINITIONAL_QUESTION = /(?:\bwhat(?:'s|\s+is|\s+are)\b|\bwhat\s+does\b[\s\S]{0,240}\bmeans?\b|\bexplain\b|\bhow\s+do\s+i\b|\bhow\s+does\b|\bwhy\s+(?:do|does|is|are|should)\b|是什么|什么意思|什么是|怎么理解|如何理解|是啥)/i
+const NON_MUTATION = /(?:\bwithout\s+changing\s+any\s+files\b|\bexplain\s+only\b|\bdo\s+not\s+edit\s+any\s+files\b|\bwithout\s+editing\s+files\b|\bwithout\s+executing\s+anything\b|\banswer\s+conceptually\b|只讲原理|不要修改文件|只解释概念|不改文件|不要实际执行命令)/i
+const EN_COMMAND = String.raw`(?:fix|implement|patch|refactor|repair|correct|change|edit|update|apply|write)\b`
+const ZH_COMMAND = String.raw`(?:修复|实现|改正|重构)`
+const ZH_COMMAND_LINK = String.raw`(?:然后|并且|并|以及|再|接着)`
+/** An imperative to change the workspace. A mention inside "what does X mean" or "如何运行测试" is not one. */
+const COMMAND_ACTION = new RegExp([
+  String.raw`(?:^|[.!?。！？]\s*)(?:please\s+)?${EN_COMMAND}`,
+  String.raw`(?:^|[.!?。！？]\s*)(?:请\s*)?${ZH_COMMAND}`,
+  String.raw`\b(?:and then|then)\s+(?:please\s+)?${EN_COMMAND}`,
+  String.raw`\band\s+(?:please\s+)?${EN_COMMAND}`,
+  String.raw`,?\s*(?:and\s+)?then\s+(?:please\s+)?${EN_COMMAND}`,
+  String.raw`(?:然后|并且)(?:请\s*)?${ZH_COMMAND}`,
+  String.raw`(?:[，,]\s*)?(?:并|以及|再|接着)(?:请\s*)?${ZH_COMMAND}`,
+  String.raw`(?:^|[.!?。！？]\s*|\b(?:and|then)\s+)(?:please\s+)?run\b[\s\S]{0,48}\btests?\b`,
+  String.raw`(?:^|[.!?。！？]\s*|(?:[，,]\s*)?${ZH_COMMAND_LINK})(?:请\s*)?(?:跑测试|运行测试)`,
+  String.raw`do not stop after planning`,
+  String.raw`不要只(?:做)?计划`,
+].join('|'), 'i')
+
+/**
+ * Drop a definitional or explanation-only clause. The subject of a prefix question
+ * ("什么是运行测试") follows the marker; the subject of a suffix question ("实现是什么")
+ * precedes it. A trailing imperative ("and fix", "，并实现") stays in place.
+ */
+function stripDefinitionSubject(sentence: string): string {
+  return sentence
+    .replace(/\bwhat\s+does\b[\s\S]{0,240}?\bmeans?\b/gi, ' ')
+    .replace(/\bwhat(?:'s|\s+is|\s+are)\b[\s\S]{0,240}?[?？]/gi, ' ')
+    .replace(/\bexplain\s+what\b[^,.!?。！？]{0,240}?\b(?:is|means|does)\b/gi, ' ')
+    .replace(/请?解释(?:一下)?(?:什么是[^，,。！？?!]+|[^，,。！？?!]*?(?:是什么|什么意思))/g, ' ')
+    .replace(/(?:什么是|怎么理解|如何理解)[^，,。！？?!]*/g, ' ')
+    .replace(/[^，,。！？?!]*?(?:是什么|什么意思|是啥)/g, ' ')
+    .replace(/\b(?:please\s+)?explain\s+how\s+to\b(?:(?!\b(?:and|then)\s+)(?![，,]\s*(?:并|以及|再|接着|然后|并且))[\s\S]){0,240}/gi, ' ')
+    .replace(/\bhow\s+do\s+i\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, ' ')
+    .replace(/\bhow\s+does\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, ' ')
+    .replace(/\bwhy\s+(?:do|does|is|are|should)\b(?:(?!\b(?:and|then)\s+)[^?？])*[?？]?/gi, ' ')
+    .replace(/请?解释(?:一下)?如何(?:(?![，,]\s*(?:并|以及|再|接着|然后|并且))[^。！？?!])*/g, ' ')
+    .replace(/(?:^|[。！？?!]\s*)如何(?:(?![，,]\s*(?:并|以及|再|接着|然后|并且))[^，,。！？?!])*/g, ' ')
+    .replace(NON_MUTATION, ' ')
+}
+
+/** Sentence breaks. A dot followed by a letter, as in calc.py, stays inside the sentence. */
+function sentencesOf(text: string): string[] {
+  const parts: string[] = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!
+    const cjk = char === '。' || char === '！' || char === '？'
+    const latinEnd = (char === '.' || char === '!' || char === '?') && (i === text.length - 1 || /\s/.test(text[i + 1] ?? ''))
+    if (!cjk && !latinEnd) continue
+    parts.push(text.slice(start, i + 1))
+    start = i + 1
+  }
+  if (start < text.length) parts.push(text.slice(start))
+  return parts.map(sentence => sentence.trim()).filter(Boolean)
+}
+
+/**
+ * True when the user asked for a workspace change. A definitional question that
+ * only mentions words like patch or implement is not a change request.
+ */
+function concreteImplementationRequest(text: string): boolean {
+  const normalized = normalizeQuote(text)
+  if (!IMPLEMENTATION_REQUEST.test(normalized)) return false
+  for (const sentence of sentencesOf(normalized)) {
+    const stripped = stripDefinitionSubject(sentence)
+    if (COMMAND_ACTION.test(stripped)) return true
+    if (!DEFINITIONAL_QUESTION.test(sentence) && IMPLEMENTATION_REQUEST.test(stripped)) return true
+  }
+  return false
+}
+
+export function directTurnLeavesWorkOpen(userTexts: readonly string[], assistantText: string): boolean {
+  return PLANNING_REPLY.test(assistantText) || userTexts.some(concreteImplementationRequest)
+}
+
 /** Literal code spans (`like this`) a requirement asks for; a candidate that omits them gets flagged. */
 export const literalSpans = (text: string) => [...new Set([...text.matchAll(/`([^`\n]{2,120})`/g)].map(match => match[1]!))]
 
@@ -260,7 +358,7 @@ export class FusionCoordinator {
         // Adopt the known completed child of pre-workerId bindings once.
         if (!binding.workerId && previous.acceptedChild) this.bindings.assignWorker(agent.id, binding.taskId, previous.acceptedChild)
         const nextTask = asTaskId(randomUUID())
-        this.#createTask(agent, nextTask, { profile: binding.profile, prompts: binding.prompts })
+        this.#createTask(agent, nextTask, { profile: binding.profile, prompts: binding.prompts }, this.#carriedContinuationSeq(agent, binding.taskId))
         return this.bindings.rollover(agent.id, binding.taskId, nextTask)
       },
       taskContext: (agent, binding, role) => binding.profile.interactionMode === 'model-like'
@@ -371,9 +469,12 @@ export class FusionCoordinator {
     }))
     this.cachePolicy = new CachePolicy(store)
     this.keepalive = new NativeCacheKeepalive(ctx, store, this.#auxiliary, {
+      routeKey: owner => digestOf({
+        route: this.modelControl?.route(owner.binding, owner.role) ?? owner.binding.profile[owner.role],
+        epoch: readModelControl(store, owner.binding)?.epoch ?? 0,
+      }),
       owner: agent => this.owner(agent), allowed: (agent, owner) => {
         const state = this.state(owner.binding.taskId)
-        if (digestOf(this.modelControl?.route(owner.binding, owner.role) ?? owner.binding.profile[owner.role]) !== digestOf(owner.binding.profile[owner.role])) return false
         try { if (state.control.mode !== 'running' || this.#requestBlocked(agent, owner.binding, owner.role)) return false }
         catch (error) { if (error instanceof StatusPending) return false; throw error }
         if (agent.status === 'running') return true
@@ -478,6 +579,8 @@ export class FusionCoordinator {
       if (state.currentWorkOrder || state.control.mode !== 'running' || this.modelControl.blocked(binding, 'lead')) return
       if (state.lease && binding.profile.interactionMode !== 'model-like') return
       if (this.effects.pending(binding.taskId).length) return
+      const agent = this.ctx.agents.get(NativeSessionId(session.id))
+      if (agent && roleSeparated(binding) && this.#directTurnLeavesWorkOpen(agent, binding.taskId)) return
       try {
         this.#release(binding.taskId)
         this.append(binding.taskId, 'intent/chosen', { intent: 'DIRECT' })
@@ -558,12 +661,45 @@ export class FusionCoordinator {
     this.scopes.install(agent, binding, 'lead')
   }
 
-  #createTask(agent: Agent, taskId: TaskId, resolved: ResolvedProfile): void {
+  #createTask(agent: Agent, taskId: TaskId, resolved: ResolvedProfile, firstSeq?: number): void {
     this.store.create({ schemaVersion: 1, id: randomUUID(), taskId, seq: 1, revision: 1,
       type: 'task/created', createdAt: new Date().toISOString(), causeId: 'model-selector',
       payload: { parent: SessionId(agent.id), selection: { kind: 'profile', profileId: resolved.profile.id } } })
     this.append(taskId, 'profile/frozen', { digest: resolved.profile.digest, profileId: resolved.profile.id, version: resolved.profile.version })
-    this.taskContext.begin(agent, taskId)
+    this.taskContext.begin(agent, taskId, firstSeq as Parameters<NativeTaskContext['begin']>[2])
+  }
+
+  /**
+   * A bare "Continue" starts a new task after the previous one completed, but the
+   * user's original words are still the requirement source. Anything else keeps
+   * the new task's own boundary.
+   */
+  #carriedContinuationSeq(agent: Agent, previousTaskId: TaskId): number | undefined {
+    const pending = agent.inbox.nextTurn[0]
+    if (!pending || (pending.source && pending.source.kind !== 'user')) return undefined
+    const text = pending.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+    if (!isBareContinuation(text)) return undefined
+    const origin = this.store.readDocument(`task-origin:${previousTaskId}`)?.value as { firstSeq?: unknown } | undefined
+    if (typeof origin?.firstSeq === 'number' && Number.isSafeInteger(origin.firstSeq) && origin.firstSeq >= 0 && origin.firstSeq <= agent.session.seq) {
+      return origin.firstSeq
+    }
+    return 0
+  }
+
+  /** User text since this task's origin, plus the Lead's latest reply. */
+  #directTurnLeavesWorkOpen(agent: Agent, taskId: TaskId): boolean {
+    const origin = this.store.readDocument(`task-origin:${taskId}`)?.value as { firstSeq?: unknown } | undefined
+    const firstSeq = typeof origin?.firstSeq === 'number' ? origin.firstSeq : 0
+    const userTexts = agent.session.snapshotEvents().flatMap(event => {
+      if (event.seq < firstSeq || event.type !== 'user/message') return []
+      if (event.data.source && event.data.source.kind !== 'user') return []
+      return event.data.content.flatMap(block => block.type === 'text' ? [block.text] : [])
+    })
+    const reply = agent.session.snapshotEvents().findLast(event => event.type === 'assistant/message')
+    const assistantText = reply && reply.type === 'assistant/message'
+      ? reply.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+      : ''
+    return directTurnLeavesWorkOpen(userTexts, assistantText)
   }
 
   async clear(agent: Agent): Promise<void> {
@@ -689,8 +825,8 @@ export class FusionCoordinator {
     const end = child.session.snapshotEvents().findLast(event => event.type === 'turn/end')
     if (!end || end.type !== 'turn/end' || end.data.reason.kind !== 'error') return
     const runtime = this.#runtime(binding.taskId), cleared = runtime.workerFailureClearedThrough
-    if (runtime.workerFailure?.childId === child.id && runtime.workerFailure.eventSeq === end.seq
-      || cleared?.childId === child.id && cleared.eventSeq >= end.seq) return
+    if (runtime.workerFailure?.childId === child.id && runtime.workerFailure?.eventSeq === end.seq
+      || cleared?.childId === child.id && (cleared?.eventSeq ?? -1) >= end.seq) return
     const error = end.data.reason.error
     // 429 alone also means transient concurrency/rate pressure. Only explicit
     // quota/billing exhaustion closes automatic continuation. Do not project raw
@@ -755,7 +891,7 @@ export class FusionCoordinator {
     if (role === 'worker' && state.currentWorkOrder?.mode === 'text' && !WORKER_FUSION_TOOLS.has(exec.name)) return 'Text delegation has no external tools; prepare the result from the supplied material'
     if (role === 'worker' && state.currentWorkOrder?.mode === 'explore'
       && !isRead(exec) && exec.name !== 'fusion_submit_result') {
-      return 'Exploration is read-only: use file search/read tools and fusion_submit_result with source ranges; no shell, edits or run_code'
+      return 'Exploration is read-only: use file search/read tools and fusion_submit_result with 1–12 source ranges (omit them only when the directory has no entries on disk and you state that the scope is empty); no shell, edits or run_code'
     }
     // The Sidekick's ceiling also holds at execution. A tool another plugin registers on the
     // Worker itself survives both the 0.2.0 start-time toolFilter and the 0.2.1 scope restriction.
@@ -773,7 +909,7 @@ export class FusionCoordinator {
     if (enforcedWorkflow(binding) && role === 'lead' && !isRead(exec) && !FUSION_TOOLS.has(exec.name)
       && (!adaptiveWorkflow(binding) || state.currentWorkOrder)) {
       const nested = this.#nestedChecks.get(exec.callId)
-      const check = isShellTool(exec.name) && nested?.agent === exec.agent && nested.parent === exec.parent
+      const check = isShellTool(exec.name) && nested?.agent === exec.agent && (typeof this.ctx.tools.resolve === 'function' || nested.parent === exec.parent)
       const takeover = state.currentWorkOrder && this.#runtime(binding.taskId).takeover
       if (!check && !takeover) return this.workflow.denyEffect(binding)
     }
@@ -815,7 +951,7 @@ export class FusionCoordinator {
       }
       const nested = this.#nestedChecks.get(exec.callId)
       if (role === 'lead' && state.intent === 'DELEGATE' && !this.#runtime(binding.taskId).takeover
-        && (!nested || nested.agent !== exec.agent || nested.parent !== exec.parent)) {
+        && (!nested || nested.agent !== exec.agent || (typeof this.ctx.tools.resolve !== 'function' && nested.parent !== exec.parent))) {
         return 'Lead is reviewing; use the native acceptance checks or request takeover'
       }
     }
@@ -887,7 +1023,7 @@ export class FusionCoordinator {
     }
     if (isRead(exec) || FUSION_TOOLS.has(exec.name)) return false
     const nested = this.#nestedChecks.get(exec.callId)
-    if (isShellTool(exec.name) && nested && nested.agent === exec.agent && nested.parent === exec.parent) return false
+    if (isShellTool(exec.name) && nested && nested.agent === exec.agent && (typeof this.ctx.tools.resolve === 'function' || nested.parent === exec.parent)) return false
     if (isShellTool(exec.name) && (exec.arguments as { run_in_background?: unknown }).run_in_background === true) {
       this.workflow.denyEffect(binding)
       return 'FUSION_LEAD_READ_ONLY: the Lead runs only short foreground inspection commands. Test runs and long commands belong to the Sidekick: delegate them.'
@@ -1206,7 +1342,7 @@ export class FusionCoordinator {
       .map(check => `${check.definition.id}: ${JSON.stringify(check.plan.allowedFailures)}`)
     const knownText = known.length ? `\n\nPre-existing failures the Host observed on the untouched workspace before you started (not part of this task; these checks pass while only these fail, so do not change unrelated code to fix them):\n${known.join('\n')}` : ''
     const brief = `${request}${hard}Current stage brief (Lead-authored; later feedback may advance or replace this stage without changing the frozen work order):\n${args.brief}\n\nFrozen work order (goal and constraints apply throughout this work order, across all implementation stages):\n${JSON.stringify(shownOrder)}\n\n${mode === 'explore'
-      ? 'Read-only exploration: return findings and source ranges through fusion_submit_result. Do not implement, run commands, or claim task completion.'
+      ? 'Read-only exploration: return findings through fusion_submit_result. A completed report cites 1–12 file ranges. Omit ranges only when the directory has no entries on disk and the summary states that the scope is empty; the host accepts that only when its own listing is also empty. Hidden, gitignored and excluded entries still count. A search that matches nothing in a workspace that still has files does not qualify. Do not implement, run commands, or claim task completion.'
       : `Acceptance commands:\n${JSON.stringify(args.checks)}${knownText}`}`
     const payload = this.store.putArtifact(binding.taskId, Buffer.from(brief), 'text/plain')
     const prepared = this.state(binding.taskId)
@@ -1465,6 +1601,9 @@ export class FusionCoordinator {
       if (report.status === 'completed') {
         const cited = citedEvidenceChanged(runtime.root, runtime.base, report)
         if (cited) throw new Error(`Cited exploration evidence changed: ${cited}. Frozen baseline ${order.baseSnapshot}. Submit blocked or needs-decision to record the drift.`)
+        if (!report.sources.length && !scopeDirectoryEmpty(runtime.root)) {
+          throw new Error('A completed exploration requires 1–12 source ranges')
+        }
       }
       this.store.transact(binding.taskId, state.seq, persisted => ({
         events: [{ schemaVersion: 1, id: randomUUID(), taskId: binding.taskId, seq: state.seq + 1,
@@ -1744,10 +1883,10 @@ export class FusionCoordinator {
       } }))]
     dispose.push(scope.tools.register(defineTool({ name: 'fusion_submit_result', description: role === 'lead'
       ? 'Lead use only after fusion_takeover: submit your own correction so the frozen checks run again. To judge a Sidekick report, use fusion_review_result instead.'
-      : 'Submit the current work-order report and conclude this Worker turn. Read-only exploration requires source ranges; implementation retains frozen checks and Lead review.',
-        parameters: { summary: { type: 'string', description: 'Changes and findings; put nonblocking observations here.', required: true }, status: { type: 'string', enum: ['completed', 'blocked', 'needs-decision'], required: true },
+      : 'Submit the current work-order report and conclude this Worker turn. Read-only exploration requires 1–12 source ranges, unless the directory has no entries on disk and the summary states that the scope is empty. Hidden, gitignored and excluded entries still count, and the host checks again when the Lead collects or finishes the report. Implementation retains frozen checks and Lead review.',
+        parameters: { summary: { type: 'string', description: 'Changes and findings; put nonblocking observations here. For an empty scope, state that the scope is empty (for example "the scope is empty" or "没有文件").', required: true }, status: { type: 'string', enum: ['completed', 'blocked', 'needs-decision'], required: true },
           unresolved: { ...stringList, description: 'Remaining requirement failures, blocking risks or decisions. Every item prevents final acceptance. Nonblocking observations belong in summary; never omit an actual unresolved requirement.' },
-          sources: { type: 'array', description: 'Required for completed exploration: 1–12 workspace-relative file ranges, each at most 80 lines. Host captures exact text; no invented snippets.',
+          sources: { type: 'array', description: 'Required for a completed exploration when the directory contains any entry: 1–12 workspace-relative file ranges, each at most 80 lines. Host captures exact text; no invented snippets. Omit sources only when the directory itself has no entries and the summary states that the scope is empty. Hidden, gitignored and excluded entries still count. A search miss inside a non-empty workspace does not qualify.',
             items: { type: 'object', additionalProperties: false, properties: {
               path: { type: 'string', required: true }, startLine: { type: 'integer', required: true }, endLine: { type: 'integer', required: true },
             } } },
@@ -1840,6 +1979,9 @@ export class FusionCoordinator {
           if (state.lease) throw new Error('Read-only exploration still holds a write lease')
           const cited = citedEvidenceChanged(runtime.root, runtime.base, state.exploration!)
           if (cited) throw new Error(`Cited exploration evidence changed: ${cited}. Frozen baseline ${state.exploration!.snapshot}.`)
+          if (!state.exploration!.sources.length && !scopeDirectoryEmpty(runtime.root)) {
+            throw new Error('A completed exploration requires 1–12 source ranges')
+          }
           // The cited files decide a read-only answer. An unrelated FIFO or socket that breaks
           // the whole-tree snapshot falls back to the baseline those files were checked against.
           try { snapshot = snapshotWorkspace(runtime.root).id }

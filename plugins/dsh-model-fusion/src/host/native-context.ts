@@ -62,7 +62,7 @@ export class NativeContextGuard {
     const text = (value: string) => meter.estimateMessage(createUserMessage({ content: [{ type: 'text', text: value }],
       source: { kind: 'plugin:dsh-model-fusion' } }))
     const fixed = (system ? text(system) : 0) + (tools?.length ? text(JSON.stringify(tools)) : 0)
-    const actual = messages.reduce((total, message) => total + meter.estimateMessage(message.id ? message : createUserMessage({ content: message.content, source: { kind: 'plugin:dsh-model-fusion' } })), 0) + fixed
+    const actual = messages.reduce((total, message) => total + meter.estimateMessage(message.role !== 'user' || message.id !== undefined ? (message as Parameters<typeof meter.estimateMessage>[0]) : createUserMessage({ content: message.content, source: { kind: 'plugin:dsh-model-fusion' } })), 0) + fixed
     const pinned = messages.flatMap(message => message.source?.kind === 'plugin:dsh-model-fusion'
       && message.source.form === 'snapshot' ? message.source.sections.filter(section => section.name === FUSION_TASK_CONTEXT) : []).at(-1)
     // A summary cannot shrink the required current task snapshot, system prompt
@@ -109,7 +109,7 @@ export class NativeContextGuard {
       catch (error) {
         const reason = `Fusion 上下文检查失败：${error instanceof Error ? error.message : String(error)}`
         if (!auxiliary && request.purpose !== 'session-title') guard.blocked(owner, reason)
-        yield { type: 'finish', reason: { kind: 'error', failure: new LlmError(reason, 'FUSION_CONTEXT_UNAVAILABLE').failure } }
+        yield { type: 'finish', reason: { kind: 'error', failure: LlmError.fromFailure({ message: reason, code: 'FUSION_CONTEXT_UNAVAILABLE' }).failure } }
         return
       }
       request.signal?.throwIfAborted()
@@ -121,7 +121,7 @@ export class NativeContextGuard {
         const reason = `Fusion 上下文 ${check.measurement.inputTokens} 超过本轮预算 ${check.budget}（估算）`
         if (isAgentLoopRequest(request) && request.purpose === undefined) guard.#rejected.set(agent, { owner, recordId, ...check })
         else if (!auxiliary && request.purpose !== 'session-title') guard.blocked(owner, reason)
-        yield { type: 'finish', reason: { kind: 'error', failure: new LlmError(reason, FUSION_CONTEXT_BUDGET).failure } }
+        yield { type: 'finish', reason: { kind: 'error', failure: LlmError.fromFailure({ message: reason, code: FUSION_CONTEXT_BUDGET }).failure } }
         return
       }
       if (isAgentLoopRequest(request) && request.purpose === undefined) guard.#rejected.delete(agent)

@@ -14,6 +14,13 @@ const LEGACY_ROW_HASHES = [
   '7c8951b48a8fe8e477331a1c28df0b1059fae6cd6c9a9e5b133a315cc3770181',
   '909bc0f5e7a355945e7f91e47d182344e651edd90d06f0b7c9141add98f30aa7',
 ];
+// Regenerated from the backed-up rc.5 standard preset and unchanged generator.
+// Only exact generated rows may migrate; edited personas remain protected.
+const RC5_ROW_HASHES = [
+  '737cf0587bc4e9f540e29e0b994d789e7be27a20ea16306b1ea17f16c2ae1f1d',
+  '13305e7f75993604d0a7e80aaf4539e0e9b5161ca84602b2518782dba8d2627e',
+  'a8606aa2f1c158e616bb83e797e43cd032f1fb48faa3adfb397bb31433abeddc',
+];
 const PRESETS = [
   {
     id: 'mathmodel', order: 20,
@@ -134,7 +141,7 @@ export function restoreSpecializedPresets(options = {}) {
       const isCurrent = Array.isArray(currentRows) && currentRows.length >= expectedRows.length && !duplicates &&
         expectedRows.every((row, index) => isDeepStrictEqual(row, currentRows[index]));
       const isLegacy = Array.isArray(currentRows) && currentRows.length >= expectedRows.length && !duplicates &&
-        LEGACY_ROW_HASHES.every((hash, index) => rowHash(currentRows[index]) === hash);
+        [LEGACY_ROW_HASHES, RC5_ROW_HASHES].some(hashes => hashes.every((hash, index) => rowHash(currentRows[index]) === hash));
       if (!isCurrent && !isLegacy) {
         throw new Error('Managed preset block differs; inspect it before changing');
       }

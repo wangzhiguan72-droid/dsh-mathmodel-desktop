@@ -1,0 +1,161 @@
+{
+  "observedFrom": "Isolated real DSH 0.2.2-rc.3 full-profile boot, 2026-11-18",
+  "plugins": [
+    {
+      "moduleName": "@linxin666/dsh-web-all",
+      "entryId": "include:web-ui-compat",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-web-ui-settings",
+      "entryId": "include:web-ui-settings",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-plugin-manager",
+      "entryId": "include:web-ui-plugin-manager",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-market",
+      "entryId": "include:web-ui-market",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-task-board",
+      "entryId": "include:web-ui-task-board",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-task-board-github",
+      "entryId": "include:web-ui-task-board-github",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-task-board-team",
+      "entryId": "include:web-ui-task-board-team",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-agents",
+      "entryId": "include:web-ui-agents",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-remote-bridge",
+      "entryId": "include:web-ui-remote-bridge",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-task-board-remote",
+      "entryId": "include:web-ui-task-board-remote",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-ssh",
+      "entryId": "include:web-ui-ssh",
+      "enabled": false,
+      "fiberPhase": null
+    },
+    {
+      "moduleName": "@linxin666/dsh-liangshen",
+      "entryId": "include:web-ui-liangshen",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-skill-explorer",
+      "entryId": "include:web-ui-skill-explorer",
+      "enabled": false,
+      "fiberPhase": null
+    },
+    {
+      "moduleName": "@linxin666/dsh-usage",
+      "entryId": "include:web-ui-usage",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-session-archive",
+      "entryId": "include:web-ui-session-archive",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-win-bash",
+      "entryId": "include:web-ui-win-bash",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-i18n",
+      "entryId": "include:web-ui-i18n",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-diagrams",
+      "entryId": "include:web-ui-diagrams",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-browser-view",
+      "entryId": "include:web-ui-browser-view",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-community-plugins",
+      "entryId": "include:web-ui-community-plugins",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-pet",
+      "entryId": "include:web-ui-pet",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-preset-center",
+      "entryId": "include:web-ui-preset-center",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-skin-center",
+      "entryId": "include:web-ui-skin-center",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-client-ui-git-graph",
+      "entryId": "include:ui-git-graph",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-update",
+      "entryId": "include:update",
+      "enabled": true,
+      "fiberPhase": "active"
+    },
+    {
+      "moduleName": "@linxin666/dsh-remote-web-ui",
+      "entryId": "include:remote-web-ui",
+      "enabled": true,
+      "fiberPhase": "active"
+    }
+  ]
+}

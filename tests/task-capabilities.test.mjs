@@ -72,7 +72,7 @@ test('official tool registry hides images per scope, contains late registration 
   for (const name of capabilities.IMAGE_TOOLS) assert.equal(switches.toolDenied(name, imagesOff), true, `images switch covers ${name}`);
   const root = new Context();
   await root.plugin(SystemPrompt, {});
-  await root.plugin(ToolRuntime, { mode: 'native' });
+  await root.plugin(ToolRuntime, {});
   let ctx;
   await root.plugin({ inject: ['tools'], apply: child => { ctx = child; } });
   const off = { id: 'off' }, on = { id: 'on' };
@@ -89,18 +89,18 @@ test('official tool registry hides images per scope, contains late registration 
       assert.equal(ctx.tools.get(name, off), undefined);
       assert.ok(ctx.tools.get(name, on));
       assert.ok(ctx.tools.get(name));
-      assert.equal(ctx.tools.resolveExecution(name, off, true), undefined);
-      assert.match(ctx.tools.guardReason({ name, agent: off }), /未启用/);
+      assert.equal(ctx.tools.get(name, off), undefined);
+      assert.match(ctx.tools.checkGuards({ name, agent: off })?.reason, /未启用/);
     }
     assert.ok(ctx.tools.get('safe_tool', off));
     offScope.ctx.tools.register(definition('image_generate'));
     assert.ok(ctx.tools.get('image_generate', off));
-    assert.match(ctx.tools.guardReason({ name: 'image_generate', agent: off }), /未启用/);
-    assert.equal(ctx.tools.guardReason({ name: 'image_generate', agent: on }), undefined);
+    assert.match(ctx.tools.checkGuards({ name: 'image_generate', agent: off })?.reason, /未启用/);
+    assert.equal(ctx.tools.checkGuards({ name: 'image_generate', agent: on })?.reason, undefined);
     // Run the upstream lock itself; a completed or in-flight first turn cannot recompose.
     for (const boundary of [{ openTurnStartSeq: 1, lastTurn: 0 }, { openTurnStartSeq: null, lastTurn: 1 }]) {
       let recomposed = false;
-      const registry = { switches: new Map(), owner: { sessionProjections: { stateOf: () => boundary } }, recompose: async () => { recomposed = true; } };
+      const registry = { switches: new Map(), owner: { agents: { turnBoundaryOf: () => boundary } }, recompose: async () => { recomposed = true; } };
       await assert.rejects(AgentPresetRegistry.prototype.select.call(registry, off, 'task'), error => error.code === 'agent-preset/locked');
       assert.equal(recomposed, false);
     }
